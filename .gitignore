@@ -1,6 +1,5 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
+docs/
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
@@ -17,9 +16,6 @@ coverage.*
 *.coverprofile
 profile.cov
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
 # Go workspace file
 go.work
 go.work.sum
@@ -27,6 +23,18 @@ go.work.sum
 # env file
 .env
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# Wails build artifacts
+build/bin/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/*
+!frontend/dist/gitkeep
+frontend/wailsjs/
+
+# Local databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+frontend/package.json.md5
