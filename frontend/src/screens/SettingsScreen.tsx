@@ -13,62 +13,86 @@ import { DBPath, Get, Set } from "../../wailsjs/go/settings/Service";
 
 type Theme = "light" | "dark";
 
-const DISPLAY_NAME_KEY = "user.display_name";
-const OLLAMA_URL_KEY = "provider.ollama.base_url";
-
 interface Props {
   theme: Theme;
   onThemeChange: (t: Theme) => void;
 }
 
-export default function SettingsScreen({ theme, onThemeChange }: Props) {
-  const [displayName, setDisplayName] = useState("");
-  const [savedName, setSavedName] = useState("");
-  const [ollamaUrl, setOllamaUrl] = useState("");
-  const [savedOllamaUrl, setSavedOllamaUrl] = useState("");
-  const [dbPath, setDbPath] = useState("");
-  const [status, setStatus] = useState("");
+interface FieldSpec {
+  key: string; // settings key
+  label: string;
+  placeholder?: string;
+  secret?: boolean; // render as a password field
+}
+
+// SettingField loads, edits, and saves one string setting. An emptied
+// field deletes the key (Set(key, null)).
+function SettingField({
+  spec,
+  onStatus,
+}: {
+  spec: FieldSpec;
+  onStatus: (s: string) => void;
+}) {
+  const [value, setValue] = useState("");
+  const [saved, setSaved] = useState("");
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    Promise.all([Get(DISPLAY_NAME_KEY), Get(OLLAMA_URL_KEY), DBPath()])
-      .then(([name, url, path]) => {
-        if (typeof name === "string") {
-          setDisplayName(name);
-          setSavedName(name);
+    Get(spec.key)
+      .then((v) => {
+        if (typeof v === "string") {
+          setValue(v);
+          setSaved(v);
         }
-        if (typeof url === "string") {
-          setOllamaUrl(url);
-          setSavedOllamaUrl(url);
-        }
-        setDbPath(path);
         setLoaded(true);
       })
-      .catch((err) => setStatus(`Failed to load settings: ${err}`));
+      .catch((err) => onStatus(`Failed to load ${spec.label}: ${err}`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spec.key]);
+
+  const save = async () => {
+    try {
+      const trimmed = value.trim();
+      await Set(spec.key, trimmed === "" ? null : trimmed);
+      setValue(trimmed);
+      setSaved(trimmed);
+      onStatus("Saved. Applies to the next request.");
+    } catch (err) {
+      onStatus(`Failed to save ${spec.label}: ${err}`);
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={spec.key}>{spec.label}</Label>
+      <div className="flex gap-2">
+        <Input
+          id={spec.key}
+          type={spec.secret ? "password" : "text"}
+          value={value}
+          placeholder={spec.placeholder}
+          disabled={!loaded}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && save()}
+        />
+        <Button onClick={save} disabled={!loaded || value === saved}>
+          Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export default function SettingsScreen({ theme, onThemeChange }: Props) {
+  const [dbPath, setDbPath] = useState("");
+  const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    DBPath()
+      .then(setDbPath)
+      .catch(() => {});
   }, []);
-
-  const saveName = async () => {
-    try {
-      await Set(DISPLAY_NAME_KEY, displayName);
-      setSavedName(displayName);
-      setStatus("Saved.");
-    } catch (err) {
-      setStatus(`Failed to save: ${err}`);
-    }
-  };
-
-  const saveOllamaUrl = async () => {
-    try {
-      const trimmed = ollamaUrl.trim();
-      // Empty value clears the override back to the default endpoint.
-      await Set(OLLAMA_URL_KEY, trimmed === "" ? null : trimmed);
-      setOllamaUrl(trimmed);
-      setSavedOllamaUrl(trimmed);
-      setStatus("Saved. Applies to the next request.");
-    } catch (err) {
-      setStatus(`Failed to save: ${err}`);
-    }
-  };
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
@@ -79,24 +103,15 @@ export default function SettingsScreen({ theme, onThemeChange }: Props) {
             How characters address you in chat ({"{{user}}"}).
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="display-name">Name</Label>
-            <Input
-              id="display-name"
-              value={displayName}
-              placeholder="How should characters address you?"
-              disabled={!loaded}
-              onChange={(e) => setDisplayName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && saveName()}
-            />
-          </div>
-          <Button
-            onClick={saveName}
-            disabled={!loaded || displayName === savedName}
-          >
-            Save
-          </Button>
+        <CardContent>
+          <SettingField
+            spec={{
+              key: "user.display_name",
+              label: "Name",
+              placeholder: "How should characters address you?",
+            }}
+            onStatus={setStatus}
+          />
         </CardContent>
       </Card>
 
@@ -104,28 +119,67 @@ export default function SettingsScreen({ theme, onThemeChange }: Props) {
         <CardHeader>
           <CardTitle>Ollama</CardTitle>
           <CardDescription>
-            Endpoint for local inference. Leave empty for the default
+            Local inference endpoint. Leave empty for the default
             (http://localhost:11434).
           </CardDescription>
         </CardHeader>
+        <CardContent>
+          <SettingField
+            spec={{
+              key: "provider.ollama.base_url",
+              label: "Base URL",
+              placeholder: "http://localhost:11434",
+            }}
+            onStatus={setStatus}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>OpenAI-compatible</CardTitle>
+          <CardDescription>
+            OpenRouter, LM Studio, vLLM, llama.cpp server, or OpenAI. The
+            base URL includes /v1 (e.g. https://openrouter.ai/api/v1).
+            Local servers usually need no key.
+          </CardDescription>
+        </CardHeader>
         <CardContent className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="ollama-url">Base URL</Label>
-            <Input
-              id="ollama-url"
-              value={ollamaUrl}
-              placeholder="http://localhost:11434"
-              disabled={!loaded}
-              onChange={(e) => setOllamaUrl(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && saveOllamaUrl()}
-            />
-          </div>
-          <Button
-            onClick={saveOllamaUrl}
-            disabled={!loaded || ollamaUrl === savedOllamaUrl}
-          >
-            Save
-          </Button>
+          <SettingField
+            spec={{
+              key: "provider.openai.base_url",
+              label: "Base URL",
+              placeholder: "https://openrouter.ai/api/v1",
+            }}
+            onStatus={setStatus}
+          />
+          <SettingField
+            spec={{
+              key: "provider.openai.api_key",
+              label: "API key",
+              placeholder: "sk-or-…",
+              secret: true,
+            }}
+            onStatus={setStatus}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Anthropic</CardTitle>
+          <CardDescription>Direct Claude API access.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SettingField
+            spec={{
+              key: "provider.anthropic.api_key",
+              label: "API key",
+              placeholder: "sk-ant-…",
+              secret: true,
+            }}
+            onStatus={setStatus}
+          />
         </CardContent>
       </Card>
 

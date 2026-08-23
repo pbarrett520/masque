@@ -1,0 +1,40 @@
+{
+  "data": {
+    "alternate_greetings": [
+      "*A second greeting.*",
+      "*A third greeting.*"
+    ],
+    "character_book": {
+      "entries": [
+        {
+          "content": "Lorebooks are preserved but not injected in M1.",
+          "enabled": true,
+          "extensions": {},
+          "insertion_order": 0,
+          "keys": [
+            "testing"
+          ]
+        }
+      ],
+      "extensions": {}
+    },
+    "character_version": "1.0",
+    "creator": "masque-tests",
+    "description": "{{char}} is a fixture character used by Masque's importer tests.",
+    "extensions": {
+      "masque_test/keep_me": true
+    },
+    "first_mes": "*{{char}} materializes.* \"Hello, {{user}}.\"",
+    "mes_example": "\u003cSTART\u003e\n{{user}}: ping\n{{char}}: pong",
+    "name": "Ashfall",
+    "personality": "deterministic, reproducible",
+    "post_history_instructions": "",
+    "scenario": "{{user}} runs the test suite.",
+    "system_prompt": "{{original}}\n\nAlways stay deterministic.",
+    "tags": [
+      "fixture"
+    ]
+  },
+  "spec": "chara_card_v2",
+  "spec_version": "2.0"
+}

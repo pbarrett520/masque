@@ -99,6 +99,21 @@ func TestBuildSystemAssembly(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPromptOriginalPlaceholder(t *testing.T) {
+	in := testInput()
+	in.Character.SystemPrompt = "{{original}}\n\nAlso: {{char}} rhymes."
+	res := Build(in)
+	if !strings.Contains(res.System, "You are Nyx.") {
+		t.Errorf("{{original}} not replaced with default template:\n%s", res.System)
+	}
+	if !strings.Contains(res.System, "Nyx rhymes.") {
+		t.Errorf("card system_prompt tail missing:\n%s", res.System)
+	}
+	if strings.Contains(strings.ToLower(res.System), "{{original}}") {
+		t.Errorf("placeholder left in output:\n%s", res.System)
+	}
+}
+
 func TestBuildCardSystemPromptOverride(t *testing.T) {
 	in := testInput()
 	in.Character.SystemPrompt = "Custom rules for {{char}}."

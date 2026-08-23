@@ -32,8 +32,8 @@ Each step ends in a runnable app; resist reordering.
 
 1. **M1.1 — done**: Wails skeleton, SQLite + migrations, settings persist across restart
 2. **M1.2 — done**: Provider abstraction + Ollama chat (hardcoded character, streaming end to end). Live-Ollama integration tests: `go test -tags ollama_integration ./internal/provider/ollama/`
-3. M1.3: OpenAI-compat + Anthropic providers, mid-chat provider switch
-4. M1.4: Card import (PNG/JSON, V2+V3) + characters screen
+3. **M1.3 — done**: OpenAI-compat + Anthropic providers, mid-chat provider switch. OpenAI-compat is live-testable keyless against Ollama's /v1 (`go test -tags openai_integration ./internal/provider/openai/`); Anthropic has an integration test behind `anthropic_integration` awaiting a real key
+4. **M1.4 — done**: Card import (PNG/JSON, V2+V3) + characters screen. Committed fixtures in `internal/card/testdata/` are all original/synthetic (regenerate via `go generate ./internal/card`); real-world cards go in the **gitignored** `internal/card/testdata/smoke/` dir, which the smoke test picks up as independent data — never commit third-party cards
 5. M1.5: Chat polish (swipes, edit, regenerate, persona, chat list/resume)
 6. M1.6: Ollama manager + onboarding
 7. M1.7: Dev mode (context inspector, sampler panel, endpoint config, log view)

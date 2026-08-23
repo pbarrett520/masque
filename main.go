@@ -10,6 +10,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 
+	"masque/internal/character"
 	"masque/internal/chat"
 	"masque/internal/datadir"
 	"masque/internal/settings"
@@ -43,6 +44,7 @@ func run() error {
 	app := NewApp()
 	settingsSvc := settings.NewService(st)
 	chatSvc := chat.NewService(st, app.emit)
+	characterSvc := character.NewService(st)
 
 	err = wails.Run(&options.App{
 		Title:  "Masque",
@@ -57,6 +59,7 @@ func run() error {
 			app,
 			settingsSvc,
 			chatSvc,
+			characterSvc,
 		},
 	})
 	if err != nil {

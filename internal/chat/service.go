@@ -13,19 +13,29 @@ import (
 	"sync"
 	"time"
 
+	"masque/internal/card"
 	"masque/internal/prompt"
 	"masque/internal/provider"
+	"masque/internal/provider/anthropic"
 	"masque/internal/provider/ollama"
+	"masque/internal/provider/openai"
 	"masque/internal/store"
 )
 
 // Settings keys the service reads/writes. The frontend shares
-// user.display_name (settings screen) and provider.ollama.* (chat setup).
+// user.display_name and the provider.* config keys (settings screen).
 const (
-	settingChatID      = "chat.dev_chat_id"
-	settingBaseURL     = "provider.ollama.base_url"
-	settingModel       = "provider.ollama.model"
-	settingDisplayName = "user.display_name"
+	settingChatID       = "chat.dev_chat_id" // legacy M1.2 single chat; migrated to Ember on seed
+	settingActiveChar   = "chat.active_character_id"
+	settingEmberID      = "seed.ember_character_id"
+	settingOllamaURL    = "provider.ollama.base_url"
+	settingOpenAIURL    = "provider.openai.base_url"
+	settingOpenAIKey    = "provider.openai.api_key"
+	settingAnthropicURL = "provider.anthropic.base_url"
+	settingAnthropicKey = "provider.anthropic.api_key"
+	settingProvider     = "provider.default_id"
+	settingModel        = "provider.default_model"
+	settingDisplayName  = "user.display_name"
 )
 
 // showTimeout bounds the /api/show metadata call before each generation.
@@ -39,11 +49,26 @@ type contextWindower interface {
 	ContextWindow(ctx context.Context, model string) (int, error)
 }
 
+// staticContextWindow is the fallback budget for providers without a
+// metadata probe (spec §5: static table + user override for cloud; the
+// user override arrives with dev mode in M1.7). Values are deliberately
+// conservative — budgeting short only wastes headroom.
+func staticContextWindow(providerID string) int {
+	switch providerID {
+	case "anthropic":
+		return 200_000
+	case "openai":
+		return 16_384 // covers OpenRouter/LM Studio/llama.cpp defaults
+	default:
+		return 0 // prompt.Build applies its own default
+	}
+}
+
 // Service is bound to the Wails frontend as chat.Service.
 type Service struct {
 	store       *store.Store
 	emit        EmitFunc
-	newProvider func(baseURL string) provider.Provider // test seam
+	providerFor func(id string) (provider.Provider, error) // test seam
 
 	mu       sync.Mutex
 	inflight map[int64]context.CancelFunc
@@ -52,13 +77,46 @@ type Service struct {
 // NewService returns a Service backed by st that emits frontend events
 // through emit.
 func NewService(st *store.Store, emit EmitFunc) *Service {
-	return &Service{
+	s := &Service{
 		store:    st,
 		emit:     emit,
 		inflight: map[int64]context.CancelFunc{},
-		newProvider: func(baseURL string) provider.Provider {
-			return ollama.New(baseURL)
-		},
+	}
+	s.providerFor = s.buildProvider
+	return s
+}
+
+// buildProvider constructs the provider for id from current settings.
+// Providers are stateless (spec §4): keys and base URLs are read fresh
+// on every call so settings changes apply to the next request.
+func (s *Service) buildProvider(id string) (provider.Provider, error) {
+	switch id {
+	case "", "ollama":
+		return ollama.New(s.stringSetting(settingOllamaURL)), nil
+	case "openai":
+		return openai.New(s.stringSetting(settingOpenAIURL), s.stringSetting(settingOpenAIKey)), nil
+	case "anthropic":
+		return anthropic.New(s.stringSetting(settingAnthropicURL), s.stringSetting(settingAnthropicKey)), nil
+	default:
+		return nil, fmt.Errorf("unknown provider %q", id)
+	}
+}
+
+// ProviderInfo describes one selectable provider for the frontend.
+type ProviderInfo struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// NeedsKey is true when the provider is unusable until an API key
+	// is configured in settings.
+	NeedsKey bool `json:"needsKey"`
+}
+
+// Providers lists the selectable providers in display order.
+func (s *Service) Providers() []ProviderInfo {
+	return []ProviderInfo{
+		{ID: "ollama", Label: "Ollama"},
+		{ID: "openai", Label: "OpenAI-compatible", NeedsKey: false},
+		{ID: "anthropic", Label: "Anthropic", NeedsKey: s.stringSetting(settingAnthropicKey) == ""},
 	}
 }
 
@@ -70,10 +128,13 @@ type MessageView struct {
 	Truncated bool   `json:"truncated"`
 }
 
-// State is what the chat screen needs to render.
+// State is what the chat screen needs to render. A zero ChatID means
+// there is nothing to resume — the frontend shows the characters screen.
 type State struct {
 	ChatID        int64         `json:"chatId"`
+	CharacterID   int64         `json:"characterId"`
 	CharacterName string        `json:"characterName"`
+	ProviderID    string        `json:"providerId"`
 	Model         string        `json:"model"`
 	Messages      []MessageView `json:"messages"`
 }
@@ -86,20 +147,75 @@ type DonePayload struct {
 	Usage     *provider.Usage `json:"usage"`
 }
 
-// StartChat loads the single M1.2 dev chat, creating it (with the
-// character's greeting) on first run, and returns the render state.
+// StartChat resumes the last active character's chat on app launch,
+// seeding the starter character (Ember) on first run. A zero-ChatID
+// State means no character to resume — show the characters screen.
 func (s *Service) StartChat() (State, error) {
-	chat, err := s.loadOrCreateChat()
+	if err := s.ensureStarterCharacter(); err != nil {
+		return State{}, err
+	}
+	id := s.int64Setting(settingActiveChar)
+	if id == 0 {
+		id = s.int64Setting(settingEmberID)
+	}
+	if id == 0 {
+		return State{}, nil
+	}
+	if _, ok, err := s.store.GetCharacter(id); err != nil {
+		return State{}, err
+	} else if !ok {
+		return State{}, nil // deleted since last run
+	}
+	return s.OpenChat(id)
+}
+
+// OpenChat opens (resuming or creating) the chat for a character and
+// makes it the active one. New chats are seeded with the card's
+// greeting (first_mes, spec §5).
+func (s *Service) OpenChat(characterID int64) (State, error) {
+	char, ok, err := s.store.GetCharacter(characterID)
 	if err != nil {
 		return State{}, err
 	}
+	if !ok {
+		return State{}, fmt.Errorf("character %d does not exist", characterID)
+	}
+	parsed, err := card.ParseJSON([]byte(char.CardJSON))
+	if err != nil {
+		return State{}, fmt.Errorf("character %q has an unreadable card: %w", char.Name, err)
+	}
+
+	// Serialized: StrictMode double-mounts must not create two chats.
+	s.mu.Lock()
+	chat, found, err := s.store.LatestChatForCharacter(characterID)
+	if err == nil && !found {
+		chat, err = s.store.CreateChatForCharacter(characterID, parsed.DisplayName(), s.defaultProvider(), s.defaultModel())
+		if err == nil && parsed.FirstMes != "" {
+			greeting := prompt.Substitute(parsed.FirstMes, parsed.DisplayName(), s.persona().Name)
+			_, err = s.store.AppendMessage(chat.ID, provider.RoleAssistant, greeting, prompt.EstimateTokens(greeting), false)
+		}
+	}
+	s.mu.Unlock()
+	if err != nil {
+		return State{}, err
+	}
+	if err := s.store.SetSetting(settingActiveChar, fmt.Sprintf("%d", characterID)); err != nil {
+		return State{}, err
+	}
+
 	msgs, err := s.store.ActiveMessages(chat.ID)
 	if err != nil {
 		return State{}, err
 	}
+	providerID := chat.ProviderID
+	if providerID == "" {
+		providerID = "ollama"
+	}
 	state := State{
 		ChatID:        chat.ID,
-		CharacterName: hardcodedCharacter.Name,
+		CharacterID:   characterID,
+		CharacterName: parsed.DisplayName(),
+		ProviderID:    providerID,
 		Model:         chat.Model,
 		Messages:      make([]MessageView, 0, len(msgs)),
 	}
@@ -111,37 +227,58 @@ func (s *Service) StartChat() (State, error) {
 	return state, nil
 }
 
-// ListModels returns the chat-capable models at the configured endpoint.
-func (s *Service) ListModels() ([]provider.ModelInfo, error) {
+// ListModels returns the models offered by providerID's endpoint.
+func (s *Service) ListModels(providerID string) ([]provider.ModelInfo, error) {
+	p, err := s.providerFor(providerID)
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return s.newProvider(s.baseURL()).ListModels(ctx)
+	return p.ListModels(ctx)
 }
 
-// Health probes the configured endpoint; the error string (or "") is
+// Health probes providerID's endpoint; the error string (or "") is
 // returned rather than an error so the frontend can render it directly.
-func (s *Service) Health() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+func (s *Service) Health(providerID string) string {
+	p, err := s.providerFor(providerID)
+	if err != nil {
+		return err.Error()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := s.newProvider(s.baseURL()).HealthCheck(ctx); err != nil {
+	if err := p.HealthCheck(ctx); err != nil {
 		return err.Error()
 	}
 	return ""
 }
 
-// SetModel records the model for a chat and as the default for new ones.
-func (s *Service) SetModel(chatID int64, model string) error {
+// SetModel records the provider+model for a chat and as the default for
+// new chats. This is the mid-chat switch (spec §12, M1.3): the next
+// Send simply uses the chat's new provider.
+func (s *Service) SetModel(chatID int64, providerID, model string) error {
 	if model == "" {
 		return errors.New("model must not be empty")
 	}
-	if err := s.store.SetChatModel(chatID, "ollama", model); err != nil {
+	if _, err := s.providerFor(providerID); err != nil {
 		return err
 	}
-	raw, err := json.Marshal(model)
-	if err != nil {
-		return fmt.Errorf("encoding model setting: %w", err)
+	if providerID == "" {
+		providerID = "ollama"
 	}
-	return s.store.SetSetting(settingModel, string(raw))
+	if err := s.store.SetChatModel(chatID, providerID, model); err != nil {
+		return err
+	}
+	for key, value := range map[string]string{settingProvider: providerID, settingModel: model} {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return fmt.Errorf("encoding %s setting: %w", key, err)
+		}
+		if err := s.store.SetSetting(key, string(raw)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Send persists text as the user's message and starts generating the
@@ -225,8 +362,12 @@ func (s *Service) generate(ctx context.Context, chat store.Chat) {
 		msgs = append(msgs, provider.Message{Role: m.Role, Content: m.Content})
 	}
 
-	p := s.newProvider(s.baseURL())
-	contextWindow := 0
+	p, err := s.providerFor(chat.ProviderID)
+	if err != nil {
+		fail(err)
+		return
+	}
+	contextWindow := staticContextWindow(chat.ProviderID)
 	if cw, ok := p.(contextWindower); ok {
 		showCtx, cancel := context.WithTimeout(ctx, showTimeout)
 		if n, err := cw.ContextWindow(showCtx, chat.Model); err == nil {
@@ -235,8 +376,13 @@ func (s *Service) generate(ctx context.Context, chat store.Chat) {
 		cancel()
 	}
 
+	character, err := s.characterForChat(chat.ID)
+	if err != nil {
+		fail(err)
+		return
+	}
 	built := prompt.Build(prompt.Input{
-		Character:     hardcodedCharacter,
+		Character:     character,
 		Persona:       s.persona(),
 		History:       msgs,
 		ContextWindow: contextWindow,
@@ -296,39 +442,64 @@ func (s *Service) finish(chatID int64, content string, truncated bool, usage *pr
 	s.emit(fmt.Sprintf("chat:%d:done", chatID), payload)
 }
 
-// loadOrCreateChat resolves the persistent dev chat, seeding a new one
-// with the character's greeting (card.first_mes, spec §5). Serialized:
-// React StrictMode double-mounts the chat screen, and two concurrent
-// first runs must not seed two chats.
-func (s *Service) loadOrCreateChat() (store.Chat, error) {
+// ensureStarterCharacter seeds Ember as a real character row on first
+// run (so the characters screen is never empty) and adopts the legacy
+// M1.2 dev chat into her. Runs once; deleting Ember afterwards is
+// respected. Serialized against StrictMode double-mounts.
+func (s *Service) ensureStarterCharacter() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if raw, ok, err := s.store.GetSetting(settingChatID); err != nil {
-		return store.Chat{}, err
+	if _, ok, err := s.store.GetSetting(settingEmberID); err != nil {
+		return err
 	} else if ok {
-		var id int64
-		if err := json.Unmarshal([]byte(raw), &id); err == nil {
-			if chat, found, err := s.store.GetChat(id); err != nil {
-				return store.Chat{}, err
-			} else if found {
-				return chat, nil
+		return nil
+	}
+	char, err := s.store.CreateCharacter(hardcodedCharacter.Name, starterCardJSON(), nil)
+	if err != nil {
+		return fmt.Errorf("seeding starter character: %w", err)
+	}
+	// Adopt the M1.2-era dev chat, which predates character rows.
+	if legacyID := s.int64Setting(settingChatID); legacyID != 0 {
+		if owner, err := s.store.ChatCharacterID(legacyID); err == nil && owner == 0 {
+			if _, found, err := s.store.GetChat(legacyID); err == nil && found {
+				if err := s.store.LinkChatCharacter(legacyID, char.ID); err != nil {
+					return err
+				}
 			}
 		}
-		// Stale or unreadable reference: fall through and recreate.
 	}
+	return s.store.SetSetting(settingEmberID, fmt.Sprintf("%d", char.ID))
+}
 
-	chat, err := s.store.CreateChat(hardcodedCharacter.Name, "ollama", s.defaultModel())
+// characterForChat loads the prompt view of a chat's character. Chats
+// without one (pre-seed edge case) fall back to the built-in card.
+func (s *Service) characterForChat(chatID int64) (prompt.Character, error) {
+	charID, err := s.store.ChatCharacterID(chatID)
 	if err != nil {
-		return store.Chat{}, err
+		return prompt.Character{}, err
 	}
-	greeting := prompt.Substitute(hardcodedCharacter.FirstMes, hardcodedCharacter.Name, s.persona().Name)
-	if _, err := s.store.AppendMessage(chat.ID, provider.RoleAssistant, greeting, prompt.EstimateTokens(greeting), false); err != nil {
-		return store.Chat{}, err
+	if charID == 0 {
+		return hardcodedCharacter, nil
 	}
-	if err := s.store.SetSetting(settingChatID, fmt.Sprintf("%d", chat.ID)); err != nil {
-		return store.Chat{}, err
+	char, ok, err := s.store.GetCharacter(charID)
+	if err != nil {
+		return prompt.Character{}, err
 	}
-	return chat, nil
+	if !ok {
+		return prompt.Character{}, fmt.Errorf("character %d for chat %d is missing", charID, chatID)
+	}
+	parsed, err := card.ParseJSON([]byte(char.CardJSON))
+	if err != nil {
+		return prompt.Character{}, fmt.Errorf("character %q has an unreadable card: %w", char.Name, err)
+	}
+	return prompt.Character{
+		Name:         parsed.DisplayName(),
+		Description:  parsed.Description,
+		Personality:  parsed.Personality,
+		Scenario:     parsed.Scenario,
+		SystemPrompt: parsed.SystemPrompt,
+		FirstMes:     parsed.FirstMes,
+	}, nil
 }
 
 // persona builds the M1.2 persona from the display-name setting;
@@ -341,12 +512,29 @@ func (s *Service) persona() prompt.Persona {
 	return prompt.Persona{Name: name}
 }
 
-func (s *Service) baseURL() string {
-	return s.stringSetting(settingBaseURL) // "" → provider default
+func (s *Service) defaultProvider() string {
+	if id := s.stringSetting(settingProvider); id != "" {
+		return id
+	}
+	return "ollama"
 }
 
 func (s *Service) defaultModel() string {
 	return s.stringSetting(settingModel)
+}
+
+// int64Setting reads a JSON-number (or numeric-string) setting,
+// returning 0 when unset or malformed.
+func (s *Service) int64Setting(key string) int64 {
+	raw, ok, err := s.store.GetSetting(key)
+	if err != nil || !ok {
+		return 0
+	}
+	var v int64
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return 0
+	}
+	return v
 }
 
 // stringSetting reads a JSON-string setting, returning "" when unset or

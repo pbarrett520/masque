@@ -1,0 +1,35 @@
+{
+  "data": {
+    "alternate_greetings": [],
+    "assets": [
+      {
+        "ext": "png",
+        "name": "main",
+        "type": "icon",
+        "uri": "ccdefault:"
+      }
+    ],
+    "character_version": "1.0",
+    "creator": "masque-tests",
+    "creator_notes": "Original Masque test fixture.",
+    "description": "A V3 fixture character.",
+    "extensions": {},
+    "first_mes": "\"Call me {{char}}.\"",
+    "group_only_greetings": [
+      "*Group greeting.*"
+    ],
+    "mes_example": "",
+    "name": "Quillon",
+    "nickname": "Quill",
+    "personality": "brisk",
+    "post_history_instructions": "",
+    "scenario": "A V3 import test.",
+    "system_prompt": "",
+    "tags": [
+      "fixture",
+      "v3"
+    ]
+  },
+  "spec": "chara_card_v3",
+  "spec_version": "3.0"
+}

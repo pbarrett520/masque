@@ -4,9 +4,9 @@ import { Input } from "@/components/ui/input";
 import {
   Health,
   ListModels,
+  Providers,
   Send,
   SetModel,
-  StartChat,
   Stop,
 } from "../../wailsjs/go/chat/Service";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
@@ -49,9 +49,21 @@ function Bubble({ msg }: { msg: MessageView }) {
   );
 }
 
-export default function ChatScreen() {
-  const [state, setState] = useState<chat.State | null>(null);
-  const [messages, setMessages] = useState<MessageView[]>([]);
+interface Props {
+  // The chat opened by App via OpenChat/StartChat. The component is
+  // keyed by chatId, so a character switch remounts it fresh.
+  initial: chat.State;
+}
+
+export default function ChatScreen({ initial }: Props) {
+  const [state, setState] = useState<chat.State>(initial);
+  const [messages, setMessages] = useState<MessageView[]>(
+    initial.messages ?? []
+  );
+  const [providers, setProviders] = useState<chat.ProviderInfo[]>([]);
+  // Provider shown in the picker; the chat's actual provider only
+  // changes once a model is chosen (SetModel).
+  const [providerSel, setProviderSel] = useState("ollama");
   const [models, setModels] = useState<provider.ModelInfo[]>([]);
   const [healthErr, setHealthErr] = useState("");
   const [error, setError] = useState("");
@@ -64,28 +76,29 @@ export default function ChatScreen() {
   const pendingRef = useRef("");
   const rafRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const initRef = useRef(false);
 
-  const connect = useCallback(async () => {
-    setHealthErr(await Health());
+  const connect = useCallback(async (providerID: string) => {
+    setModels([]);
+    setHealthErr(await Health(providerID));
     try {
-      setModels((await ListModels()) ?? []);
+      setModels((await ListModels(providerID)) ?? []);
     } catch {
       setModels([]);
     }
   }, []);
 
   useEffect(() => {
-    if (initRef.current) return; // StrictMode double-mount guard
-    initRef.current = true;
-    StartChat()
-      .then((s) => {
-        setState(s);
-        setMessages(s.messages ?? []);
-      })
-      .catch((err) => setError(`Failed to load chat: ${err}`));
-    void connect();
-  }, [connect]);
+    Providers().then(setProviders).catch(() => {});
+    setProviderSel(initial.providerId || "ollama");
+    void connect(initial.providerId || "ollama");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial.chatId]);
+
+  const pickProvider = (id: string) => {
+    setProviderSel(id);
+    setError("");
+    void connect(id);
+  };
 
   useEffect(() => {
     if (!state) return;
@@ -153,13 +166,19 @@ export default function ChatScreen() {
   const pickModel = async (model: string) => {
     if (!state || !model) return;
     try {
-      await SetModel(state.chatId, model);
-      setState(chat.State.createFrom({ ...state, model }));
+      await SetModel(state.chatId, providerSel, model);
+      setState(chat.State.createFrom({ ...state, providerId: providerSel, model }));
       setError("");
     } catch (err) {
       setError(String(err));
     }
   };
+
+  // The model dropdown reflects the chat's model only while the picker
+  // is on the chat's provider; after switching providers it's unset
+  // until the user picks one.
+  const selectedModel =
+    state && providerSel === state.providerId ? state.model : "";
 
   return (
     <div className="mx-auto flex h-full max-w-2xl flex-col gap-3">
@@ -170,7 +189,20 @@ export default function ChatScreen() {
         <span className="flex-1" />
         <select
           className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-          value={state?.model ?? ""}
+          value={providerSel}
+          onChange={(e) => pickProvider(e.target.value)}
+          disabled={!state || streaming}
+        >
+          {providers.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+              {p.needsKey ? " (needs API key)" : ""}
+            </option>
+          ))}
+        </select>
+        <select
+          className="h-8 max-w-64 rounded-md border border-input bg-background px-2 text-sm"
+          value={selectedModel}
           onChange={(e) => pickModel(e.target.value)}
           disabled={!state || streaming}
         >
@@ -182,19 +214,23 @@ export default function ChatScreen() {
               {m.id}
             </option>
           ))}
-          {/* Keep a stale selection visible even if it's not installed anymore. */}
-          {state?.model && !models.some((m) => m.id === state.model) && (
-            <option value={state.model}>{state.model} (missing)</option>
+          {/* Keep a stale selection visible even if it's not offered anymore. */}
+          {selectedModel && !models.some((m) => m.id === selectedModel) && (
+            <option value={selectedModel}>{selectedModel} (missing)</option>
           )}
         </select>
-        <Button variant="outline" size="sm" onClick={connect}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void connect(providerSel)}
+        >
           Refresh
         </Button>
       </div>
 
       {healthErr && (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          Ollama is not reachable: {healthErr}
+          Endpoint problem: {healthErr}
         </div>
       )}
       {error && (

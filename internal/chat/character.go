@@ -1,6 +1,10 @@
 package chat
 
-import "masque/internal/prompt"
+import (
+	"encoding/json"
+
+	"masque/internal/prompt"
+)
 
 // hardcodedCharacter is the M1.2 stand-in until card import lands
 // (M1.4). It deliberately uses {{char}}/{{user}} macros so substitution
@@ -21,4 +25,34 @@ var hardcodedCharacter = prompt.Character{
 		"smiles like she's been waiting all evening.*\n\n" +
 		"\"There you are. Sit anywhere you like — the fire's warmest by the " +
 		"window. Long road?\"",
+}
+
+// starterCardJSON renders the built-in character as a V3 card so she
+// lives in the characters table like any imported card.
+func starterCardJSON() string {
+	raw, err := json.Marshal(map[string]any{
+		"spec":         "chara_card_v3",
+		"spec_version": "3.0",
+		"data": map[string]any{
+			"name":                      hardcodedCharacter.Name,
+			"description":               hardcodedCharacter.Description,
+			"personality":               hardcodedCharacter.Personality,
+			"scenario":                  hardcodedCharacter.Scenario,
+			"first_mes":                 hardcodedCharacter.FirstMes,
+			"mes_example":               "",
+			"system_prompt":             "",
+			"post_history_instructions": "",
+			"alternate_greetings":       []string{},
+			"group_only_greetings":      []string{},
+			"tags":                      []string{"starter"},
+			"creator":                   "masque",
+			"character_version":         "1.0",
+			"creator_notes":             "Masque's built-in starter character.",
+			"extensions":                map[string]any{},
+		},
+	})
+	if err != nil {
+		panic(err) // static data; cannot fail
+	}
+	return string(raw)
 }

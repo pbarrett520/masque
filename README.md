@@ -15,12 +15,16 @@ Built with [Wails v2](https://wails.io) (Go backend, native webview) and a
 React/TypeScript/Tailwind/shadcn-ui frontend, backed by an embedded SQLite
 database (`modernc.org/sqlite`, pure Go — no CGo from our own code).
 
-**Status:** M1.2 — streaming chat against a local Ollama instance works
-end to end with a built-in test character: provider abstraction, prompt
-assembly with token budgeting, chat persistence (including stop-mid-reply),
-and a chat UI with model picker. Cloud providers, character card import,
-and dev mode land in later M1 milestones; see `docs/masque-dev-spec-m1.md`
-for the full build order (not checked into this repo).
+**Status:** M1.4 — character card import (PNG/JSON, V2+V3 specs,
+including V1-era bare JSON) with a characters screen: import by file
+picker or drag-drop, minimal in-app creation, per-character chats with
+card-driven prompts ({{char}}/{{user}}/{{original}} macros, V3
+nicknames), and V3 export with unknown-field preservation. Lorebooks
+are preserved but not yet injected. Three providers (Ollama native,
+OpenAI-compatible, Anthropic) with mid-chat switching. Chat polish
+(swipes, edit, regenerate) and dev mode land in later M1 milestones;
+see `docs/masque-dev-spec-m1.md` for the full build order (not checked
+into this repo).
 
 ## Prerequisites
 
@@ -72,10 +76,12 @@ make clean  # remove build/bin, frontend/dist contents, frontend/wailsjs
 ```
 app.go, main.go          Wails app entry point, service wiring
 internal/
+  card/                   Card parsing/export (PNG chunks, V1/V2/V3 JSON)
+  character/              Characters library service (bound to frontend)
   chat/                   Chat orchestration service (bound to frontend)
   datadir/                Platform data directory resolution
   prompt/                 Prompt assembly + token budgeting
-  provider/               Provider interface; ollama/ implementation
+  provider/               Provider interface; ollama/, openai/, anthropic/
   settings/               Key/value settings service (bound to frontend)
   store/                  SQLite access layer + embedded migrations
 frontend/

@@ -85,7 +85,10 @@ func EstimateTokens(s string) int {
 	return (2*len(s) + 6) / 7
 }
 
-var macroRe = regexp.MustCompile(`(?i){{\s*(char|user)\s*}}`)
+var (
+	macroRe    = regexp.MustCompile(`(?i){{\s*(char|user)\s*}}`)
+	originalRe = regexp.MustCompile(`(?i){{\s*original\s*}}`)
+)
 
 // Substitute replaces the {{char}} and {{user}} macros (case-insensitive,
 // tolerating inner whitespace) — the only macro language in M1.
@@ -126,8 +129,11 @@ func Build(in Input) Result {
 		text   string
 	}
 	preamble := part{source: "default_template", text: sub(defaultTemplate)}
-	if in.Character.SystemPrompt != "" {
-		preamble = part{source: "card.system_prompt", text: sub(in.Character.SystemPrompt)}
+	if sp := in.Character.SystemPrompt; sp != "" {
+		// V2 spec: {{original}} splices in the system prompt that would
+		// have been used without the card override.
+		sp = originalRe.ReplaceAllString(sp, defaultTemplate)
+		preamble = part{source: "card.system_prompt", text: sub(sp)}
 	}
 	parts := []part{preamble}
 	if d := in.Character.Description; d != "" {

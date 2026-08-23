@@ -1,0 +1,8 @@
+{
+  "description": "A V1-era card: bare fields, no spec envelope.",
+  "first_mes": "*Willow waves at {{user}}.*",
+  "mes_example": "",
+  "name": "Willow",
+  "personality": "quiet",
+  "scenario": "A V1 import test."
+}

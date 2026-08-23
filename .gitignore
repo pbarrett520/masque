@@ -41,3 +41,6 @@ frontend/package.json.md5
 
 # Playwright MCP artifacts
 .playwright-mcp/
+
+# Real-world card smoke tests: never committed (see M1.4 test policy)
+internal/card/testdata/smoke/
