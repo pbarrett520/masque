@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { DBPath, Get, Set } from "../../wailsjs/go/settings/Service";
+import { Persona, SetPersona } from "../../wailsjs/go/chat/Service";
 
 type Theme = "light" | "dark";
 
@@ -84,6 +85,77 @@ function SettingField({
   );
 }
 
+// PersonaCard edits the default persona (name drives {{user}}; the
+// description is added to the system prompt).
+function PersonaCard({ onStatus }: { onStatus: (s: string) => void }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [saved, setSaved] = useState({ name: "", description: "" });
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    Persona()
+      .then((p) => {
+        setName(p.name ?? "");
+        setDescription(p.description ?? "");
+        setSaved({ name: p.name ?? "", description: p.description ?? "" });
+        setLoaded(true);
+      })
+      .catch((err) => onStatus(`Failed to load persona: ${err}`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const save = async () => {
+    try {
+      await SetPersona(name, description);
+      setSaved({ name: name.trim(), description: description.trim() });
+      onStatus("Persona saved. Applies to the next message.");
+    } catch (err) {
+      onStatus(`Failed to save persona: ${err}`);
+    }
+  };
+
+  const dirty = name !== saved.name || description !== saved.description;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Persona</CardTitle>
+        <CardDescription>
+          Who you are in chats: the name replaces {"{{user}}"}, the
+          description is shown to the character.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="persona-name">Name</Label>
+          <Input
+            id="persona-name"
+            value={name}
+            placeholder="How should characters address you?"
+            disabled={!loaded}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="persona-description">Description</Label>
+          <textarea
+            id="persona-description"
+            className="min-h-20 w-full rounded-md border border-input bg-transparent p-2 text-sm shadow-xs"
+            value={description}
+            placeholder="A few words about who the characters are talking to (optional)"
+            disabled={!loaded}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+        <Button onClick={save} disabled={!loaded || !name.trim() || !dirty}>
+          Save
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SettingsScreen({ theme, onThemeChange }: Props) {
   const [dbPath, setDbPath] = useState("");
   const [status, setStatus] = useState("");
@@ -96,24 +168,7 @@ export default function SettingsScreen({ theme, onThemeChange }: Props) {
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Display name</CardTitle>
-          <CardDescription>
-            How characters address you in chat ({"{{user}}"}).
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <SettingField
-            spec={{
-              key: "user.display_name",
-              label: "Name",
-              placeholder: "How should characters address you?",
-            }}
-            onStatus={setStatus}
-          />
-        </CardContent>
-      </Card>
+      <PersonaCard onStatus={setStatus} />
 
       <Card>
         <CardHeader>

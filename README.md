@@ -15,16 +15,15 @@ Built with [Wails v2](https://wails.io) (Go backend, native webview) and a
 React/TypeScript/Tailwind/shadcn-ui frontend, backed by an embedded SQLite
 database (`modernc.org/sqlite`, pure Go — no CGo from our own code).
 
-**Status:** M1.4 — character card import (PNG/JSON, V2+V3 specs,
-including V1-era bare JSON) with a characters screen: import by file
-picker or drag-drop, minimal in-app creation, per-character chats with
-card-driven prompts ({{char}}/{{user}}/{{original}} macros, V3
-nicknames), and V3 export with unknown-field preservation. Lorebooks
-are preserved but not yet injected. Three providers (Ollama native,
-OpenAI-compatible, Anthropic) with mid-chat switching. Chat polish
-(swipes, edit, regenerate) and dev mode land in later M1 milestones;
-see `docs/masque-dev-spec-m1.md` for the full build order (not checked
-into this repo).
+**Status:** M1.5 — chat polish: regenerate-as-swipes with left/right
+navigation (alternate greetings included), in-place message editing, a
+default persona (name + description) that flows into prompts, and a
+chat list with multiple chats per character, resume, and delete. On top
+of card import (PNG/JSON, V1/V2/V3) with a characters screen, and three
+providers (Ollama native, OpenAI-compatible, Anthropic) with mid-chat
+switching. Ollama management/onboarding and dev mode land in later M1
+milestones; see `docs/masque-dev-spec-m1.md` for the full build order
+(not checked into this repo).
 
 ## Prerequisites
 

@@ -27,6 +27,7 @@ import (
 const (
 	settingChatID       = "chat.dev_chat_id" // legacy M1.2 single chat; migrated to Ember on seed
 	settingActiveChar   = "chat.active_character_id"
+	settingActiveChat   = "chat.active_chat_id"
 	settingEmberID      = "seed.ember_character_id"
 	settingOllamaURL    = "provider.ollama.base_url"
 	settingOpenAIURL    = "provider.openai.base_url"
@@ -120,12 +121,16 @@ func (s *Service) Providers() []ProviderInfo {
 	}
 }
 
-// MessageView is a message as the frontend renders it.
+// MessageView is a message as the frontend renders it. SwipeCount > 1
+// means the message has regeneration siblings to swipe between;
+// SwipeIndex is 1-based.
 type MessageView struct {
-	ID        int64  `json:"id"`
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	Truncated bool   `json:"truncated"`
+	ID         int64  `json:"id"`
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	Truncated  bool   `json:"truncated"`
+	SwipeIndex int    `json:"swipeIndex"`
+	SwipeCount int    `json:"swipeCount"`
 }
 
 // State is what the chat screen needs to render. A zero ChatID means
@@ -147,12 +152,18 @@ type DonePayload struct {
 	Usage     *provider.Usage `json:"usage"`
 }
 
-// StartChat resumes the last active character's chat on app launch,
-// seeding the starter character (Ember) on first run. A zero-ChatID
-// State means no character to resume — show the characters screen.
+// StartChat resumes the last active chat on app launch, seeding the
+// starter character (Ember) on first run. A zero-ChatID State means
+// nothing to resume — show the characters screen.
 func (s *Service) StartChat() (State, error) {
 	if err := s.ensureStarterCharacter(); err != nil {
 		return State{}, err
+	}
+	if chatID := s.int64Setting(settingActiveChat); chatID != 0 {
+		if state, err := s.OpenChatByID(chatID); err == nil {
+			return state, nil
+		}
+		// Deleted since last run: fall back to the character path.
 	}
 	id := s.int64Setting(settingActiveChar)
 	if id == 0 {
@@ -169,40 +180,140 @@ func (s *Service) StartChat() (State, error) {
 	return s.OpenChat(id)
 }
 
-// OpenChat opens (resuming or creating) the chat for a character and
-// makes it the active one. New chats are seeded with the card's
-// greeting (first_mes, spec §5).
+// OpenChat opens the most recent chat for a character (creating the
+// first one if none exists) and makes it the active one.
 func (s *Service) OpenChat(characterID int64) (State, error) {
-	char, ok, err := s.store.GetCharacter(characterID)
+	char, parsed, err := s.loadCharacter(characterID)
 	if err != nil {
 		return State{}, err
 	}
-	if !ok {
-		return State{}, fmt.Errorf("character %d does not exist", characterID)
-	}
-	parsed, err := card.ParseJSON([]byte(char.CardJSON))
-	if err != nil {
-		return State{}, fmt.Errorf("character %q has an unreadable card: %w", char.Name, err)
-	}
-
 	// Serialized: StrictMode double-mounts must not create two chats.
 	s.mu.Lock()
 	chat, found, err := s.store.LatestChatForCharacter(characterID)
 	if err == nil && !found {
-		chat, err = s.store.CreateChatForCharacter(characterID, parsed.DisplayName(), s.defaultProvider(), s.defaultModel())
-		if err == nil && parsed.FirstMes != "" {
-			greeting := prompt.Substitute(parsed.FirstMes, parsed.DisplayName(), s.persona().Name)
-			_, err = s.store.AppendMessage(chat.ID, provider.RoleAssistant, greeting, prompt.EstimateTokens(greeting), false)
-		}
+		chat, err = s.createChat(char.ID, parsed)
 	}
 	s.mu.Unlock()
 	if err != nil {
 		return State{}, err
 	}
+	return s.activate(chat, characterID, parsed.DisplayName())
+}
+
+// NewChat starts a fresh chat with a character, seeded with the card's
+// greeting, regardless of existing chats.
+func (s *Service) NewChat(characterID int64) (State, error) {
+	char, parsed, err := s.loadCharacter(characterID)
+	if err != nil {
+		return State{}, err
+	}
+	chat, err := s.createChat(char.ID, parsed)
+	if err != nil {
+		return State{}, err
+	}
+	return s.activate(chat, characterID, parsed.DisplayName())
+}
+
+// OpenChatByID resumes a specific chat from the chat list.
+func (s *Service) OpenChatByID(chatID int64) (State, error) {
+	chat, ok, err := s.store.GetChat(chatID)
+	if err != nil {
+		return State{}, err
+	}
+	if !ok {
+		return State{}, fmt.Errorf("chat %d does not exist", chatID)
+	}
+	characterID, err := s.store.ChatCharacterID(chatID)
+	if err != nil {
+		return State{}, err
+	}
+	if characterID == 0 {
+		return State{}, fmt.Errorf("chat %d has no character", chatID)
+	}
+	_, parsed, err := s.loadCharacter(characterID)
+	if err != nil {
+		return State{}, err
+	}
+	return s.activate(chat, characterID, parsed.DisplayName())
+}
+
+// ListChats returns every chat for the chat list, most recent first.
+func (s *Service) ListChats() ([]store.ChatListItem, error) {
+	return s.store.ListChats()
+}
+
+// DeleteChat removes a chat and its messages.
+func (s *Service) DeleteChat(chatID int64) error {
+	s.Stop(chatID)
+	return s.store.DeleteChat(chatID)
+}
+
+// loadCharacter fetches a character row and its parsed card.
+func (s *Service) loadCharacter(characterID int64) (store.Character, card.Card, error) {
+	char, ok, err := s.store.GetCharacter(characterID)
+	if err != nil {
+		return store.Character{}, card.Card{}, err
+	}
+	if !ok {
+		return store.Character{}, card.Card{}, fmt.Errorf("character %d does not exist", characterID)
+	}
+	parsed, err := card.ParseJSON([]byte(char.CardJSON))
+	if err != nil {
+		return store.Character{}, card.Card{}, fmt.Errorf("character %q has an unreadable card: %w", char.Name, err)
+	}
+	return char, parsed, nil
+}
+
+// createChat inserts a chat seeded with the card's greeting. The
+// greeting and any alternate_greetings form a swipe group (V2 spec:
+// alternates MUST be offered as swipes on the first message).
+func (s *Service) createChat(characterID int64, parsed card.Card) (store.Chat, error) {
+	chat, err := s.store.CreateChatForCharacter(characterID, parsed.DisplayName(), s.defaultProvider(), s.defaultModel())
+	if err != nil {
+		return store.Chat{}, err
+	}
+	if parsed.FirstMes == "" {
+		return chat, nil
+	}
+	sub := func(text string) string {
+		return prompt.Substitute(text, parsed.DisplayName(), s.persona().Name)
+	}
+	greeting := sub(parsed.FirstMes)
+	first, err := s.store.AppendMessage(chat.ID, provider.RoleAssistant, greeting, prompt.EstimateTokens(greeting), false)
+	if err != nil {
+		return store.Chat{}, err
+	}
+	if len(parsed.AlternateGreetings) > 0 {
+		if err := s.store.SetSwipeGroup(first.ID, first.ID); err != nil {
+			return store.Chat{}, err
+		}
+		for _, alt := range parsed.AlternateGreetings {
+			if strings.TrimSpace(alt) == "" {
+				continue
+			}
+			text := sub(alt)
+			if _, err := s.store.AppendSwipe(chat.ID, provider.RoleAssistant, text, prompt.EstimateTokens(text), false, first.ID, false); err != nil {
+				return store.Chat{}, err
+			}
+		}
+	}
+	return chat, nil
+}
+
+// activate marks a chat as the resume target and builds its State.
+func (s *Service) activate(chat store.Chat, characterID int64, characterName string) (State, error) {
 	if err := s.store.SetSetting(settingActiveChar, fmt.Sprintf("%d", characterID)); err != nil {
 		return State{}, err
 	}
+	if err := s.store.SetSetting(settingActiveChat, fmt.Sprintf("%d", chat.ID)); err != nil {
+		return State{}, err
+	}
+	return s.stateForChat(chat, characterID, characterName)
+}
 
+// stateForChat assembles the render state, including swipe positions
+// for grouped messages.
+func (s *Service) stateForChat(chat store.Chat, characterID int64, characterName string) (State, error) {
 	msgs, err := s.store.ActiveMessages(chat.ID)
 	if err != nil {
 		return State{}, err
@@ -214,15 +325,26 @@ func (s *Service) OpenChat(characterID int64) (State, error) {
 	state := State{
 		ChatID:        chat.ID,
 		CharacterID:   characterID,
-		CharacterName: parsed.DisplayName(),
+		CharacterName: characterName,
 		ProviderID:    providerID,
 		Model:         chat.Model,
 		Messages:      make([]MessageView, 0, len(msgs)),
 	}
 	for _, m := range msgs {
-		state.Messages = append(state.Messages, MessageView{
-			ID: m.ID, Role: m.Role, Content: m.Content, Truncated: m.Truncated,
-		})
+		mv := MessageView{ID: m.ID, Role: m.Role, Content: m.Content, Truncated: m.Truncated}
+		if m.SwipeGroup != 0 {
+			swipes, err := s.store.SwipesInGroup(chat.ID, m.SwipeGroup)
+			if err != nil {
+				return State{}, err
+			}
+			mv.SwipeCount = len(swipes)
+			for i, sw := range swipes {
+				if sw.ID == m.ID {
+					mv.SwipeIndex = i + 1
+				}
+			}
+		}
+		state.Messages = append(state.Messages, mv)
 	}
 	return state, nil
 }
@@ -318,9 +440,200 @@ func (s *Service) Send(chatID int64, text string) (MessageView, error) {
 		return MessageView{}, err
 	}
 
-	go s.generate(genCtx, chat)
+	go s.generate(genCtx, chat, 0)
 
 	return MessageView{ID: userMsg.ID, Role: userMsg.Role, Content: userMsg.Content}, nil
+}
+
+// Regenerate replaces the last assistant reply with a fresh one: the
+// old reply becomes an inactive swipe sibling (spec §9: regenerate
+// creates a swipe). An in-flight generation is canceled first
+// (spec §10: regenerate cancels then restarts).
+func (s *Service) Regenerate(chatID int64) error {
+	chat, ok, err := s.store.GetChat(chatID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("chat %d does not exist", chatID)
+	}
+	if chat.Model == "" {
+		return errors.New("no model selected")
+	}
+
+	// Cancel any in-flight generation and wait for its slot to clear.
+	s.Stop(chatID)
+	deadline := time.Now().Add(3 * time.Second)
+	for s.isBusy(chatID) {
+		if time.Now().After(deadline) {
+			return errors.New("previous generation is still shutting down; try again")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	msgs, err := s.store.ActiveMessages(chatID)
+	if err != nil {
+		return err
+	}
+	if len(msgs) == 0 {
+		return errors.New("nothing to regenerate")
+	}
+	last := msgs[len(msgs)-1]
+	if last.Role != provider.RoleAssistant {
+		return errors.New("the last message is not an assistant reply")
+	}
+	hasUserTurn := false
+	for _, m := range msgs[:len(msgs)-1] {
+		if m.Role == provider.RoleUser {
+			hasUserTurn = true
+			break
+		}
+	}
+	if !hasUserTurn {
+		return errors.New("greetings can't be regenerated — swipe between them instead")
+	}
+
+	group := last.SwipeGroup
+	if group == 0 {
+		group = last.ID
+		if err := s.store.SetSwipeGroup(last.ID, group); err != nil {
+			return err
+		}
+	}
+
+	genCtx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	if _, busy := s.inflight[chatID]; busy {
+		s.mu.Unlock()
+		cancel()
+		return errors.New("a reply is already being generated for this chat")
+	}
+	s.inflight[chatID] = cancel
+	s.mu.Unlock()
+
+	if err := s.store.DeactivateMessage(last.ID); err != nil {
+		s.clearInflight(chatID)
+		return err
+	}
+
+	go s.generate(genCtx, chat, group)
+	return nil
+}
+
+// Swipe activates the previous (direction -1) or next (+1) sibling of
+// a swiped message and returns the refreshed chat state.
+func (s *Service) Swipe(chatID, messageID int64, direction int) (State, error) {
+	if direction != 1 && direction != -1 {
+		return State{}, errors.New("direction must be -1 or 1")
+	}
+	if s.isBusy(chatID) {
+		return State{}, errors.New("wait for the current reply to finish")
+	}
+	msg, ok, err := s.store.GetMessage(messageID)
+	if err != nil {
+		return State{}, err
+	}
+	if !ok || msg.ChatID != chatID {
+		return State{}, fmt.Errorf("message %d not found in chat %d", messageID, chatID)
+	}
+	if msg.SwipeGroup == 0 {
+		return State{}, errors.New("message has no swipes")
+	}
+	swipes, err := s.store.SwipesInGroup(chatID, msg.SwipeGroup)
+	if err != nil {
+		return State{}, err
+	}
+	current := -1
+	for i, sw := range swipes {
+		if sw.ID == messageID {
+			current = i
+		}
+	}
+	target := current + direction
+	if current < 0 || target < 0 || target >= len(swipes) {
+		return State{}, errors.New("no more swipes in that direction")
+	}
+	if err := s.store.ActivateSwipe(chatID, msg.SwipeGroup, swipes[target].ID); err != nil {
+		return State{}, err
+	}
+	return s.stateForChatID(chatID)
+}
+
+// EditMessage rewrites a message's content in place (spec §9:
+// edit-any-message).
+func (s *Service) EditMessage(chatID, messageID int64, content string) error {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return errors.New("message can't be empty")
+	}
+	if s.isBusy(chatID) {
+		return errors.New("wait for the current reply to finish")
+	}
+	msg, ok, err := s.store.GetMessage(messageID)
+	if err != nil {
+		return err
+	}
+	if !ok || msg.ChatID != chatID {
+		return fmt.Errorf("message %d not found in chat %d", messageID, chatID)
+	}
+	return s.store.UpdateMessageContent(messageID, content, prompt.EstimateTokens(content))
+}
+
+// PersonaView is the default persona as the settings screen edits it.
+type PersonaView struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// Persona returns the default persona, falling back to the legacy
+// display-name setting for databases from before personas existed.
+func (s *Service) Persona() (PersonaView, error) {
+	p, ok, err := s.store.DefaultPersona()
+	if err != nil {
+		return PersonaView{}, err
+	}
+	if ok {
+		return PersonaView{Name: p.Name, Description: p.Description}, nil
+	}
+	return PersonaView{Name: s.stringSetting(settingDisplayName)}, nil
+}
+
+// SetPersona creates or updates the default persona.
+func (s *Service) SetPersona(name, description string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("persona name can't be empty")
+	}
+	return s.store.SetDefaultPersona(name, strings.TrimSpace(description))
+}
+
+func (s *Service) isBusy(chatID int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, busy := s.inflight[chatID]
+	return busy
+}
+
+// stateForChatID rebuilds State from just a chat id.
+func (s *Service) stateForChatID(chatID int64) (State, error) {
+	chat, ok, err := s.store.GetChat(chatID)
+	if err != nil {
+		return State{}, err
+	}
+	if !ok {
+		return State{}, fmt.Errorf("chat %d does not exist", chatID)
+	}
+	characterID, err := s.store.ChatCharacterID(chatID)
+	if err != nil {
+		return State{}, err
+	}
+	name := hardcodedCharacter.Name
+	if characterID != 0 {
+		if _, parsed, err := s.loadCharacter(characterID); err == nil {
+			name = parsed.DisplayName()
+		}
+	}
+	return s.stateForChat(chat, characterID, name)
 }
 
 // Stop cancels the in-flight generation for a chat, if any. The partial
@@ -344,11 +657,15 @@ func (s *Service) clearInflight(chatID int64) {
 }
 
 // generate runs one turn: build the prompt, stream the reply, persist
-// the outcome, and emit events. It owns the in-flight slot.
-func (s *Service) generate(ctx context.Context, chat store.Chat) {
+// the outcome, and emit events. It owns the in-flight slot. A non-zero
+// swipeGroup means this is a regeneration whose result joins that group.
+func (s *Service) generate(ctx context.Context, chat store.Chat, swipeGroup int64) {
 	defer s.clearInflight(chat.ID)
 
 	fail := func(err error) {
+		// A failed regeneration must not leave its swipe group with no
+		// active member — bring the previous reply back.
+		s.restoreSwipe(chat.ID, swipeGroup)
 		s.emit(fmt.Sprintf("chat:%d:error", chat.ID), err.Error())
 	}
 
@@ -407,39 +724,64 @@ func (s *Service) generate(ctx context.Context, chat store.Chat) {
 		}
 		switch {
 		case ev.Done:
-			s.finish(chat.ID, sb.String(), false, ev.Usage)
+			s.finish(chat.ID, sb.String(), false, ev.Usage, swipeGroup)
 		case ev.Err != nil:
 			canceled := errors.Is(ev.Err, context.Canceled)
-			if sb.Len() > 0 {
-				// Persist what streamed before the cut, marked truncated.
-				s.finish(chat.ID, sb.String(), true, nil)
-			} else if canceled {
-				s.finish(chat.ID, "", true, nil)
+			if sb.Len() > 0 || canceled {
+				// Persist any partial, marked truncated; an empty
+				// cancel just restores the previous swipe.
+				s.finish(chat.ID, sb.String(), true, nil, swipeGroup)
+			} else {
+				s.restoreSwipe(chat.ID, swipeGroup)
 			}
 			if !canceled {
-				fail(ev.Err)
+				s.emit(fmt.Sprintf("chat:%d:error", chat.ID), ev.Err.Error())
 			}
 		}
 	}
 }
 
-// finish persists the assistant reply (unless empty) and emits the done
-// event.
-func (s *Service) finish(chatID int64, content string, truncated bool, usage *provider.Usage) {
+// finish persists the assistant reply and emits the done event. An
+// empty reply persists nothing; if it was a regeneration, the previous
+// swipe is reactivated so the group is never left headless.
+func (s *Service) finish(chatID int64, content string, truncated bool, usage *provider.Usage, swipeGroup int64) {
 	payload := DonePayload{Content: content, Truncated: truncated, Usage: usage}
 	if content != "" {
 		tokens := prompt.EstimateTokens(content)
 		if usage != nil && usage.CompletionTokens > 0 {
 			tokens = usage.CompletionTokens
 		}
-		msg, err := s.store.AppendMessage(chatID, provider.RoleAssistant, content, tokens, truncated)
+		msg, err := s.store.AppendSwipe(chatID, provider.RoleAssistant, content, tokens, truncated, swipeGroup, true)
 		if err != nil {
 			s.emit(fmt.Sprintf("chat:%d:error", chatID), err.Error())
 			return
 		}
 		payload.MessageID = msg.ID
+	} else {
+		s.restoreSwipe(chatID, swipeGroup)
 	}
 	s.emit(fmt.Sprintf("chat:%d:done", chatID), payload)
+}
+
+// restoreSwipe reactivates the newest member of a swipe group if none
+// is active (a regeneration was canceled or failed before producing
+// anything).
+func (s *Service) restoreSwipe(chatID, swipeGroup int64) {
+	if swipeGroup == 0 {
+		return
+	}
+	swipes, err := s.store.SwipesInGroup(chatID, swipeGroup)
+	if err != nil || len(swipes) == 0 {
+		return
+	}
+	for _, sw := range swipes {
+		if sw.IsActive {
+			return
+		}
+	}
+	if err := s.store.ActivateSwipe(chatID, swipeGroup, swipes[len(swipes)-1].ID); err != nil {
+		s.emit(fmt.Sprintf("chat:%d:error", chatID), err.Error())
+	}
 }
 
 // ensureStarterCharacter seeds Ember as a real character row on first
@@ -502,9 +844,12 @@ func (s *Service) characterForChat(chatID int64) (prompt.Character, error) {
 	}, nil
 }
 
-// persona builds the M1.2 persona from the display-name setting;
-// personas proper land in M1.5.
+// persona builds the prompt persona from the default persona row,
+// falling back to the legacy display-name setting, then to "User".
 func (s *Service) persona() prompt.Persona {
+	if p, ok, err := s.store.DefaultPersona(); err == nil && ok {
+		return prompt.Persona{Name: p.Name, Description: p.Description}
+	}
 	name := s.stringSetting(settingDisplayName)
 	if name == "" {
 		name = "User"
