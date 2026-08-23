@@ -38,3 +38,6 @@ frontend/wailsjs/
 *.db-wal
 *.db-shm
 frontend/package.json.md5
+
+# Playwright MCP artifacts
+.playwright-mcp/
