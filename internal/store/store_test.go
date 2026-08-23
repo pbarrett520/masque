@@ -15,6 +15,17 @@ func openTestStore(t *testing.T) *Store {
 	return s
 }
 
+// latestVersion is what a fresh database should migrate to: the number
+// of embedded migration files.
+func latestVersion(t *testing.T) int {
+	t.Helper()
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatalf("loadMigrations: %v", err)
+	}
+	return len(ms)
+}
+
 func TestMigrateFreshDatabase(t *testing.T) {
 	s := openTestStore(t)
 
@@ -22,8 +33,8 @@ func TestMigrateFreshDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != 1 {
-		t.Errorf("schema version = %d, want 1", v)
+	if want := latestVersion(t); v != want {
+		t.Errorf("schema version = %d, want %d", v, want)
 	}
 
 	for _, table := range []string{"characters", "personas", "chats", "messages", "settings"} {
@@ -48,8 +59,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if v != 1 {
-			t.Errorf("round %d: schema version = %d, want 1", i+1, v)
+		if want := latestVersion(t); v != want {
+			t.Errorf("round %d: schema version = %d, want %d", i+1, v, want)
 		}
 		_ = s.Close()
 	}

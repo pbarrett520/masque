@@ -31,7 +31,7 @@ The dev spec and vision doc live in `docs/`, which is **gitignored on purpose** 
 Each step ends in a runnable app; resist reordering.
 
 1. **M1.1 — done**: Wails skeleton, SQLite + migrations, settings persist across restart
-2. M1.2: Provider abstraction + Ollama chat (hardcoded character, streaming end to end)
+2. **M1.2 — done**: Provider abstraction + Ollama chat (hardcoded character, streaming end to end). Live-Ollama integration tests: `go test -tags ollama_integration ./internal/provider/ollama/`
 3. M1.3: OpenAI-compat + Anthropic providers, mid-chat provider switch
 4. M1.4: Card import (PNG/JSON, V2+V3) + characters screen
 5. M1.5: Chat polish (swipes, edit, regenerate, persona, chat list/resume)
