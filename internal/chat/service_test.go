@@ -84,7 +84,7 @@ func newFixture(t *testing.T) *fixture {
 	f := &fixture{store: st, fake: newFakeProvider(), events: make(chan emitted, 100)}
 	f.svc = NewService(st, func(event string, args ...any) {
 		f.events <- emitted{event: event, args: args}
-	})
+	}, nil)
 	f.svc.providerFor = func(string) (provider.Provider, error) { return f.fake, nil }
 	return f
 }

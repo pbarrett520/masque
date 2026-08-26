@@ -25,6 +25,8 @@ type Theme = "light" | "dark";
 interface Props {
   theme: Theme;
   onThemeChange: (t: Theme) => void;
+  dev: boolean;
+  onDevChange: (on: boolean) => void;
 }
 
 interface FieldSpec {
@@ -252,7 +254,7 @@ function LocalModelsCard({ onStatus }: { onStatus: (s: string) => void }) {
   );
 }
 
-export default function SettingsScreen({ theme, onThemeChange }: Props) {
+export default function SettingsScreen({ theme, onThemeChange, dev, onDevChange }: Props) {
   const [dbPath, setDbPath] = useState("");
   const [status, setStatus] = useState("");
 
@@ -333,6 +335,30 @@ export default function SettingsScreen({ theme, onThemeChange }: Props) {
             }}
             onStatus={setStatus}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Developer mode</CardTitle>
+          <CardDescription>
+            Adds the context inspector, sampler panel, full model manager,
+            endpoint config, and request log. Instant, no restart.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex gap-2">
+          <Button
+            variant={!dev ? "default" : "outline"}
+            onClick={() => onDevChange(false)}
+          >
+            Off
+          </Button>
+          <Button
+            variant={dev ? "default" : "outline"}
+            onClick={() => onDevChange(true)}
+          >
+            On
+          </Button>
         </CardContent>
       </Card>
 

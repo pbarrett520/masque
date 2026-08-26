@@ -12,13 +12,15 @@ import {
 import { chat, store } from "../wailsjs/go/models";
 import CharactersScreen from "./screens/CharactersScreen";
 import ChatScreen from "./screens/ChatScreen";
+import DevScreen from "./screens/DevScreen";
 import OnboardingScreen from "./screens/OnboardingScreen";
 import SettingsScreen from "./screens/SettingsScreen";
 
 type Theme = "light" | "dark";
-type View = "characters" | "chat" | "settings";
+type View = "characters" | "chat" | "settings" | "dev";
 
 const THEME_KEY = "appearance.theme";
+const DEV_KEY = "dev.enabled";
 
 function applyTheme(theme: Theme) {
   document.documentElement.classList.toggle("dark", theme === "dark");
@@ -35,6 +37,7 @@ function timeAgo(unixSeconds: number): string {
 export default function App() {
   const [view, setView] = useState<View>("characters");
   const [theme, setTheme] = useState<Theme>("dark");
+  const [dev, setDev] = useState(false);
   // null = still deciding; true = show the first-run wizard.
   const [onboarding, setOnboarding] = useState<boolean | null>(null);
   const [chatState, setChatState] = useState<chat.State | null>(null);
@@ -72,6 +75,9 @@ export default function App() {
         applyTheme(t);
       })
       .catch(() => applyTheme("dark"));
+    Get(DEV_KEY)
+      .then((v) => setDev(v === true))
+      .catch(() => {});
     // First run (no completed onboarding, no default model) gets the
     // wizard; anything else — including pre-onboarding installs, which
     // have a default model — goes straight to the app.
@@ -137,6 +143,14 @@ export default function App() {
     Set(THEME_KEY, t).catch(() => {});
   };
 
+  // Dev mode is instant and persisted (spec §9); leaving it while on
+  // the dev tab falls back to settings.
+  const switchDev = (on: boolean) => {
+    setDev(on);
+    Set(DEV_KEY, on ? true : null).catch(() => {});
+    if (!on && view === "dev") setView("settings");
+  };
+
   const tab = (v: View, label: string, disabled = false) => (
     <Button
       variant={view === v ? "secondary" : "ghost"}
@@ -169,6 +183,7 @@ export default function App() {
           {tab("characters", "Characters")}
           {tab("chat", "Chat", !chatState)}
           {tab("settings", "Settings")}
+          {dev && tab("dev", "Dev")}
         </nav>
         {error && (
           <span className="truncate text-sm text-destructive">{error}</span>
@@ -226,14 +241,21 @@ export default function App() {
               <ChatScreen
                 key={chatState.chatId}
                 initial={chatState}
+                dev={dev}
                 onActivity={refreshChats}
               />
             </div>
           </div>
         )}
         {view === "settings" && (
-          <SettingsScreen theme={theme} onThemeChange={switchTheme} />
+          <SettingsScreen
+            theme={theme}
+            onThemeChange={switchTheme}
+            dev={dev}
+            onDevChange={switchDev}
+          />
         )}
+        {view === "dev" && dev && <DevScreen />}
       </main>
     </div>
   );

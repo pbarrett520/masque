@@ -121,6 +121,64 @@ func (s *Store) AppendSwipe(chatID int64, role, content string, tokenEstimate in
 	}, nil
 }
 
+// SetMessagePrompt attaches the context-inspector record (JSON) to a
+// message, captured when the message was generated.
+func (s *Store) SetMessagePrompt(messageID int64, promptJSON string) error {
+	res, err := s.db.Exec("UPDATE messages SET prompt_json = ? WHERE id = ?", promptJSON, messageID)
+	if err != nil {
+		return fmt.Errorf("setting prompt on message %d: %w", messageID, err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("setting prompt on message %d: message does not exist", messageID)
+	}
+	return nil
+}
+
+// GetMessagePrompt returns a message's inspector record; the second
+// return is false when the message has none (user messages, greetings,
+// messages generated before M1.7).
+func (s *Store) GetMessagePrompt(messageID int64) (string, bool, error) {
+	var v sql.NullString
+	err := s.db.QueryRow("SELECT prompt_json FROM messages WHERE id = ?", messageID).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("getting prompt of message %d: %w", messageID, err)
+	}
+	return v.String, v.Valid && v.String != "", nil
+}
+
+// SetChatParams stores a chat's sampler overrides as JSON ("" clears).
+func (s *Store) SetChatParams(chatID int64, paramsJSON string) error {
+	var v any
+	if paramsJSON != "" {
+		v = paramsJSON
+	}
+	res, err := s.db.Exec("UPDATE chats SET params_json = ?, updated_at = ? WHERE id = ?", v, time.Now().Unix(), chatID)
+	if err != nil {
+		return fmt.Errorf("setting params on chat %d: %w", chatID, err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("setting params on chat %d: chat does not exist", chatID)
+	}
+	return nil
+}
+
+// GetChatParams returns a chat's sampler overrides JSON; the second
+// return is false when none are set.
+func (s *Store) GetChatParams(chatID int64) (string, bool, error) {
+	var v sql.NullString
+	err := s.db.QueryRow("SELECT params_json FROM chats WHERE id = ?", chatID).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("getting params of chat %d: %w", chatID, err)
+	}
+	return v.String, v.Valid && v.String != "", nil
+}
+
 // SetSwipeGroup stamps a message into a swipe group (used when its
 // first sibling is created).
 func (s *Store) SetSwipeGroup(messageID, swipeGroup int64) error {

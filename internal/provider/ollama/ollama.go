@@ -70,8 +70,19 @@ func (p *Provider) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
-// ListModels implements provider.Provider via GET /api/tags.
+// ListModels implements provider.Provider via GET /api/tags, hiding
+// models that can't chat (e.g. embedding-only).
 func (p *Provider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
+	return p.listModels(ctx, false)
+}
+
+// ListAllModels returns every installed model, chat-capable or not —
+// the dev-mode model manager (§9) shows the complete list.
+func (p *Provider) ListAllModels(ctx context.Context) ([]provider.ModelInfo, error) {
+	return p.listModels(ctx, true)
+}
+
+func (p *Provider) listModels(ctx context.Context, includeAll bool) ([]provider.ModelInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/api/tags", nil)
 	if err != nil {
 		return nil, fmt.Errorf("building tags request: %w", err)
@@ -103,7 +114,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]provider.ModelInfo, error)
 	for _, m := range body.Models {
 		// Newer Ollama reports capabilities; hide models that can't chat
 		// (e.g. embedding-only). Older versions omit the field — keep those.
-		if len(m.Capabilities) > 0 && !slices.Contains(m.Capabilities, "completion") {
+		if !includeAll && len(m.Capabilities) > 0 && !slices.Contains(m.Capabilities, "completion") {
 			continue
 		}
 		models = append(models, provider.ModelInfo{
@@ -199,7 +210,18 @@ func buildChatBody(req provider.ChatRequest) (chatBody, provider.ParamReport) {
 	if len(options) == 0 {
 		options = nil
 	}
-	return chatBody{Model: req.Model, Messages: messages, Stream: true, Options: options}, report
+	return chatBody{Model: req.Model, Messages: messages, Stream: !req.NoStream, Options: options}, report
+}
+
+// DescribeRequest implements provider.RequestDescriber: the exact
+// /api/chat request ChatStream would send, for the context inspector.
+func (p *Provider) DescribeRequest(req provider.ChatRequest) (provider.RequestDescription, error) {
+	body, report := buildChatBody(req)
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return provider.RequestDescription{}, fmt.Errorf("encoding chat request: %w", err)
+	}
+	return provider.RequestDescription{URL: p.baseURL + "/api/chat", Body: raw, Report: report}, nil
 }
 
 // chatChunk is one streamed line of a /api/chat response.

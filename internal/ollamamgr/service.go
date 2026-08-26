@@ -120,6 +120,14 @@ func (s *Service) Installed() ([]provider.ModelInfo, error) {
 	return s.provider().ListModels(ctx)
 }
 
+// All lists every installed model, including non-chat ones — the
+// dev-mode full model manager (§9).
+func (s *Service) All() ([]provider.ModelInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	return s.provider().ListAllModels(ctx)
+}
+
 // Recommended returns the curated roster annotated with installed and
 // fits flags. Endpoint errors degrade gracefully: the roster still
 // renders, with nothing marked installed.

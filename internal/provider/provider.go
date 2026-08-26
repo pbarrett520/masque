@@ -4,7 +4,10 @@
 // call carries its own context.
 package provider
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Message roles, matching the CHECK constraint on messages.role.
 const (
@@ -51,6 +54,29 @@ type ChatRequest struct {
 	Messages []Message // history; System is carried separately
 	System   string
 	Params   SamplerParams
+	// NoStream asks for a non-streamed completion (dev-mode endpoint
+	// config, §9): the provider sends stream:false and the ChatStream
+	// channel delivers the whole reply as one delta followed by Done.
+	NoStream bool
+}
+
+// RequestDescription is the wire request a provider would send for a
+// ChatRequest: the exact URL and JSON body, plus which sampler params
+// were sent vs dropped. This is what the dev-mode context inspector
+// renders (§9); bodies never contain credentials (keys travel in
+// headers), so the description is safe to persist and display.
+type RequestDescription struct {
+	URL    string          `json:"url"`
+	Body   json.RawMessage `json:"body"`
+	Report ParamReport     `json:"report"`
+}
+
+// RequestDescriber is implemented by providers that can describe their
+// wire request without sending it. All Masque providers implement it;
+// it is optional on the interface so third-party additions degrade to
+// "no inspector detail" instead of breaking.
+type RequestDescriber interface {
+	DescribeRequest(req ChatRequest) (RequestDescription, error)
 }
 
 // SamplerParams are the user-tunable generation parameters. Pointer

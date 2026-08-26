@@ -175,7 +175,7 @@ func buildChatBody(req provider.ChatRequest) (chatBody, provider.ParamReport) {
 		MaxTokens: defaultMaxTokens,
 		System:    req.System,
 		Messages:  normalizeMessages(req.Messages),
-		Stream:    true,
+		Stream:    !req.NoStream,
 	}
 	report := provider.ParamReport{Sent: map[string]any{}, Dropped: []string{}}
 	noSampling := samplingRemoved(req.Model)
@@ -237,7 +237,21 @@ type apiError struct {
 	Message string `json:"message"`
 }
 
-// ChatStream implements provider.Provider via POST /v1/messages.
+// DescribeRequest implements provider.RequestDescriber: the exact
+// /v1/messages request ChatStream would send, for the context
+// inspector. The API key travels in a header, never in the body.
+func (p *Provider) DescribeRequest(req provider.ChatRequest) (provider.RequestDescription, error) {
+	body, report := buildChatBody(req)
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return provider.RequestDescription{}, fmt.Errorf("encoding chat request: %w", err)
+	}
+	return provider.RequestDescription{URL: p.baseURL + "/v1/messages", Body: raw, Report: report}, nil
+}
+
+// ChatStream implements provider.Provider via POST /v1/messages. With
+// req.NoStream the completion is requested unstreamed and arrives on
+// the channel as a single delta followed by Done.
 func (p *Provider) ChatStream(ctx context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
 	body, _ := buildChatBody(req)
 	payload, err := json.Marshal(body)
@@ -248,7 +262,9 @@ func (p *Provider) ChatStream(ctx context.Context, req provider.ChatRequest) (<-
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Accept", "text/event-stream")
+	if !req.NoStream {
+		httpReq.Header.Set("Accept", "text/event-stream")
+	}
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("opening anthropic chat stream: %w", err)
@@ -260,8 +276,70 @@ func (p *Provider) ChatStream(ctx context.Context, req provider.ChatRequest) (<-
 	}
 
 	events := make(chan provider.StreamEvent)
-	go p.readStream(ctx, resp.Body, events)
+	if req.NoStream {
+		go p.readOnce(ctx, resp.Body, events)
+	} else {
+		go p.readStream(ctx, resp.Body, events)
+	}
 	return events, nil
+}
+
+// message is a non-streamed /v1/messages response.
+type message struct {
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+	StopReason string `json:"stop_reason"`
+	Usage      struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
+	Error *apiError `json:"error"`
+}
+
+// readOnce delivers a non-streamed message as one delta plus Done.
+func (p *Provider) readOnce(ctx context.Context, body io.ReadCloser, events chan<- provider.StreamEvent) {
+	defer close(events)
+	defer body.Close() //nolint:errcheck // read-only body
+
+	raw, err := io.ReadAll(io.LimitReader(body, maxLine))
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			err = ctxErr
+		}
+		events <- provider.StreamEvent{Err: err}
+		return
+	}
+	var m message
+	if err := json.Unmarshal(raw, &m); err != nil {
+		events <- provider.StreamEvent{Err: fmt.Errorf("decoding message: %w", err)}
+		return
+	}
+	if m.Error != nil {
+		events <- provider.StreamEvent{Err: fmt.Errorf("anthropic: %s", m.Error.Message)}
+		return
+	}
+	if m.StopReason == "refusal" {
+		events <- provider.StreamEvent{Err: fmt.Errorf("anthropic: the model declined to respond (refusal)")}
+		return
+	}
+	var text strings.Builder
+	for _, block := range m.Content {
+		if block.Type == "text" {
+			text.WriteString(block.Text)
+		}
+	}
+	if text.Len() > 0 {
+		events <- provider.StreamEvent{Delta: text.String()}
+	}
+	events <- provider.StreamEvent{
+		Done: true,
+		Usage: &provider.Usage{
+			PromptTokens:     m.Usage.InputTokens,
+			CompletionTokens: m.Usage.OutputTokens,
+		},
+	}
 }
 
 // readStream pumps SSE events from body into events, closing the channel

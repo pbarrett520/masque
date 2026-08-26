@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"masque/internal/card"
+	"masque/internal/devlog"
 	"masque/internal/prompt"
 	"masque/internal/provider"
 	"masque/internal/provider/anthropic"
@@ -37,6 +38,14 @@ const (
 	settingProvider     = "provider.default_id"
 	settingModel        = "provider.default_model"
 	settingDisplayName  = "user.display_name"
+
+	// Dev-mode endpoint config (§9). Timeout bounds a whole generation;
+	// streaming=false asks providers for unstreamed completions. The
+	// context-window overrides replace the static cloud table entries.
+	settingTimeoutSecs  = "dev.request_timeout_secs"
+	settingStreaming    = "dev.streaming"
+	settingOpenAICtxWin = "provider.openai.context_window"
+	settingClaudeCtxWin = "provider.anthropic.context_window"
 )
 
 // showTimeout bounds the /api/show metadata call before each generation.
@@ -51,14 +60,20 @@ type contextWindower interface {
 }
 
 // staticContextWindow is the fallback budget for providers without a
-// metadata probe (spec §5: static table + user override for cloud; the
-// user override arrives with dev mode in M1.7). Values are deliberately
-// conservative — budgeting short only wastes headroom.
-func staticContextWindow(providerID string) int {
+// metadata probe (spec §5: static table + user override for cloud).
+// The dev-mode override settings win when set; the table values are
+// deliberately conservative — budgeting short only wastes headroom.
+func (s *Service) staticContextWindow(providerID string) int {
 	switch providerID {
 	case "anthropic":
+		if n := s.int64Setting(settingClaudeCtxWin); n > 0 {
+			return int(n)
+		}
 		return 200_000
 	case "openai":
+		if n := s.int64Setting(settingOpenAICtxWin); n > 0 {
+			return int(n)
+		}
 		return 16_384 // covers OpenRouter/LM Studio/llama.cpp defaults
 	default:
 		return 0 // prompt.Build applies its own default
@@ -69,6 +84,7 @@ func staticContextWindow(providerID string) int {
 type Service struct {
 	store       *store.Store
 	emit        EmitFunc
+	log         *devlog.Log                                // nil disables request logging
 	providerFor func(id string) (provider.Provider, error) // test seam
 
 	mu       sync.Mutex
@@ -76,11 +92,12 @@ type Service struct {
 }
 
 // NewService returns a Service backed by st that emits frontend events
-// through emit.
-func NewService(st *store.Store, emit EmitFunc) *Service {
+// through emit. log may be nil to disable dev-mode request logging.
+func NewService(st *store.Store, emit EmitFunc, log *devlog.Log) *Service {
 	s := &Service{
 		store:    st,
 		emit:     emit,
+		log:      log,
 		inflight: map[int64]context.CancelFunc{},
 	}
 	s.providerFor = s.buildProvider
@@ -579,6 +596,85 @@ func (s *Service) EditMessage(chatID, messageID int64, content string) error {
 	return s.store.UpdateMessageContent(messageID, content, prompt.EstimateTokens(content))
 }
 
+// Params returns a chat's sampler overrides (dev-mode sampler panel,
+// §9). All-nil means no overrides: the model's own defaults apply.
+func (s *Service) Params(chatID int64) (provider.SamplerParams, error) {
+	raw, ok, err := s.store.GetChatParams(chatID)
+	if err != nil || !ok {
+		return provider.SamplerParams{}, err
+	}
+	var p provider.SamplerParams
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		return provider.SamplerParams{}, fmt.Errorf("chat %d has unreadable params: %w", chatID, err)
+	}
+	return p, nil
+}
+
+// SetParams stores a chat's sampler overrides; an all-nil params clears
+// them. Applies from the next generation.
+func (s *Service) SetParams(chatID int64, params provider.SamplerParams) error {
+	if _, ok, err := s.store.GetChat(chatID); err != nil {
+		return err
+	} else if !ok {
+		return fmt.Errorf("chat %d does not exist", chatID)
+	}
+	empty := params.Temperature == nil && params.TopP == nil && params.TopK == nil &&
+		params.MinP == nil && params.RepeatPenalty == nil && params.MaxTokens == nil &&
+		len(params.Stop) == 0
+	if empty {
+		return s.store.SetChatParams(chatID, "")
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Errorf("encoding params: %w", err)
+	}
+	return s.store.SetChatParams(chatID, string(raw))
+}
+
+// Inspection is the context inspector record (§9): what exactly was
+// sent to the provider for one assistant message, captured at
+// generation time and persisted with the message.
+type Inspection struct {
+	ProviderID      string               `json:"providerId"`
+	Model           string               `json:"model"`
+	CreatedAt       int64                `json:"createdAt"`
+	ContextWindow   int                  `json:"contextWindow"`
+	ReservedOutput  int                  `json:"reservedOutput"`
+	SystemTokens    int                  `json:"systemTokens"`
+	HistoryTokens   int                  `json:"historyTokens"`
+	DroppedMessages int                  `json:"droppedMessages"`
+	Segments        []prompt.Segment     `json:"segments"`
+	RequestURL      string               `json:"requestUrl"`
+	RawRequest      json.RawMessage      `json:"rawRequest"`
+	ParamReport     provider.ParamReport `json:"paramReport"`
+	NoStream        bool                 `json:"noStream"`
+}
+
+// Inspect returns the inspector record of a message. Messages without
+// one (user messages, greetings, replies generated before M1.7) return
+// a descriptive error the frontend can show as-is.
+func (s *Service) Inspect(chatID, messageID int64) (Inspection, error) {
+	msg, ok, err := s.store.GetMessage(messageID)
+	if err != nil {
+		return Inspection{}, err
+	}
+	if !ok || msg.ChatID != chatID {
+		return Inspection{}, fmt.Errorf("message %d not found in chat %d", messageID, chatID)
+	}
+	raw, ok, err := s.store.GetMessagePrompt(messageID)
+	if err != nil {
+		return Inspection{}, err
+	}
+	if !ok {
+		return Inspection{}, errors.New("no prompt record for this message — only generated replies from this version onward carry one")
+	}
+	var insp Inspection
+	if err := json.Unmarshal([]byte(raw), &insp); err != nil {
+		return Inspection{}, fmt.Errorf("message %d has an unreadable prompt record: %w", messageID, err)
+	}
+	return insp, nil
+}
+
 // PersonaView is the default persona as the settings screen edits it.
 type PersonaView struct {
 	Name        string `json:"name"`
@@ -662,6 +758,13 @@ func (s *Service) clearInflight(chatID int64) {
 func (s *Service) generate(ctx context.Context, chat store.Chat, swipeGroup int64) {
 	defer s.clearInflight(chat.ID)
 
+	// Dev-mode request timeout bounds the whole generation (§9).
+	if secs := s.int64Setting(settingTimeoutSecs); secs > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(secs)*time.Second)
+		defer cancel()
+	}
+
 	fail := func(err error) {
 		// A failed regeneration must not leave its swipe group with no
 		// active member — bring the previous reply back.
@@ -684,7 +787,7 @@ func (s *Service) generate(ctx context.Context, chat store.Chat, swipeGroup int6
 		fail(err)
 		return
 	}
-	contextWindow := staticContextWindow(chat.ProviderID)
+	contextWindow := s.staticContextWindow(chat.ProviderID)
 	if cw, ok := p.(contextWindower); ok {
 		showCtx, cancel := context.WithTimeout(ctx, showTimeout)
 		if n, err := cw.ContextWindow(showCtx, chat.Model); err == nil {
@@ -705,12 +808,69 @@ func (s *Service) generate(ctx context.Context, chat store.Chat, swipeGroup int6
 		ContextWindow: contextWindow,
 	})
 
-	events, err := p.ChatStream(ctx, provider.ChatRequest{
+	params, err := s.Params(chat.ID)
+	if err != nil {
+		fail(err)
+		return
+	}
+	req := provider.ChatRequest{
 		Model:    chat.Model,
 		Messages: built.Messages,
 		System:   built.System,
-	})
+		Params:   params,
+		NoStream: s.streamingDisabled(),
+	}
+
+	// Capture the inspector record before sending: segment breakdown
+	// from the builder plus the wire request from the provider.
+	insp := Inspection{
+		ProviderID:      chat.ProviderID,
+		Model:           chat.Model,
+		CreatedAt:       time.Now().Unix(),
+		ContextWindow:   built.ContextWindow,
+		ReservedOutput:  built.ReservedOutput,
+		SystemTokens:    built.SystemTokens,
+		HistoryTokens:   built.HistoryTokens,
+		DroppedMessages: built.DroppedMessages,
+		Segments:        built.Segments,
+		NoStream:        req.NoStream,
+	}
+	if insp.ProviderID == "" {
+		insp.ProviderID = "ollama"
+	}
+	if d, ok := p.(provider.RequestDescriber); ok {
+		if desc, err := d.DescribeRequest(req); err == nil {
+			insp.RequestURL = desc.URL
+			insp.RawRequest = desc.Body
+			insp.ParamReport = desc.Report
+		}
+	}
+	promptJSON := ""
+	if raw, err := json.Marshal(insp); err == nil {
+		promptJSON = string(raw)
+	}
+	started := time.Now()
+	logResult := func(status, errMsg, response string, usage *provider.Usage) {
+		if s.log == nil {
+			return
+		}
+		s.log.Add(devlog.Entry{
+			Time:       started.Unix(),
+			ProviderID: insp.ProviderID,
+			Model:      chat.Model,
+			URL:        insp.RequestURL,
+			Request:    insp.RawRequest,
+			Status:     status,
+			Error:      errMsg,
+			Response:   response,
+			DurationMs: time.Since(started).Milliseconds(),
+			Usage:      usage,
+		})
+	}
+
+	events, err := p.ChatStream(ctx, req)
 	if err != nil {
+		logResult("error", err.Error(), "", nil)
 		fail(err)
 		return
 	}
@@ -724,13 +884,19 @@ func (s *Service) generate(ctx context.Context, chat store.Chat, swipeGroup int6
 		}
 		switch {
 		case ev.Done:
-			s.finish(chat.ID, sb.String(), false, ev.Usage, swipeGroup)
+			logResult("ok", "", sb.String(), ev.Usage)
+			s.finish(chat.ID, sb.String(), false, ev.Usage, swipeGroup, promptJSON)
 		case ev.Err != nil:
 			canceled := errors.Is(ev.Err, context.Canceled)
+			if canceled {
+				logResult("canceled", ev.Err.Error(), sb.String(), nil)
+			} else {
+				logResult("error", ev.Err.Error(), sb.String(), nil)
+			}
 			if sb.Len() > 0 || canceled {
 				// Persist any partial, marked truncated; an empty
 				// cancel just restores the previous swipe.
-				s.finish(chat.ID, sb.String(), true, nil, swipeGroup)
+				s.finish(chat.ID, sb.String(), true, nil, swipeGroup, promptJSON)
 			} else {
 				s.restoreSwipe(chat.ID, swipeGroup)
 			}
@@ -741,10 +907,25 @@ func (s *Service) generate(ctx context.Context, chat store.Chat, swipeGroup int6
 	}
 }
 
-// finish persists the assistant reply and emits the done event. An
-// empty reply persists nothing; if it was a regeneration, the previous
-// swipe is reactivated so the group is never left headless.
-func (s *Service) finish(chatID int64, content string, truncated bool, usage *provider.Usage, swipeGroup int64) {
+// streamingDisabled reads the dev-mode streaming toggle; unset means
+// streaming stays on.
+func (s *Service) streamingDisabled() bool {
+	raw, ok, err := s.store.GetSetting(settingStreaming)
+	if err != nil || !ok {
+		return false
+	}
+	var v bool
+	if json.Unmarshal([]byte(raw), &v) != nil {
+		return false
+	}
+	return !v
+}
+
+// finish persists the assistant reply (with its inspector record) and
+// emits the done event. An empty reply persists nothing; if it was a
+// regeneration, the previous swipe is reactivated so the group is never
+// left headless.
+func (s *Service) finish(chatID int64, content string, truncated bool, usage *provider.Usage, swipeGroup int64, promptJSON string) {
 	payload := DonePayload{Content: content, Truncated: truncated, Usage: usage}
 	if content != "" {
 		tokens := prompt.EstimateTokens(content)
@@ -755,6 +936,12 @@ func (s *Service) finish(chatID int64, content string, truncated bool, usage *pr
 		if err != nil {
 			s.emit(fmt.Sprintf("chat:%d:error", chatID), err.Error())
 			return
+		}
+		if promptJSON != "" {
+			if err := s.store.SetMessagePrompt(msg.ID, promptJSON); err != nil {
+				// Inspector data is best-effort; the reply itself is safe.
+				s.emit(fmt.Sprintf("chat:%d:error", chatID), err.Error())
+			}
 		}
 		payload.MessageID = msg.ID
 	} else {

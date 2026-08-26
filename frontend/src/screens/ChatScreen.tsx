@@ -15,6 +15,7 @@ import {
 } from "../../wailsjs/go/chat/Service";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import { chat, provider } from "../../wailsjs/go/models";
+import { InspectorModal, SamplerPanel } from "@/components/DevPanels";
 
 interface MessageView {
   id: number;
@@ -42,6 +43,7 @@ interface BubbleProps {
   onEdit?: (msg: MessageView) => void;
   onSwipe?: (msg: MessageView, direction: number) => void;
   onRegenerate?: () => void;
+  onInspect?: (msg: MessageView) => void;
 }
 
 function Bubble({
@@ -52,6 +54,7 @@ function Bubble({
   onEdit,
   onSwipe,
   onRegenerate,
+  onInspect,
 }: BubbleProps) {
   const isUser = msg.role === "user";
   const hasSwipes = isLast && msg.swipeCount > 1;
@@ -115,6 +118,15 @@ function Bubble({
               edit
             </button>
           )}
+          {onInspect && msg.role === "assistant" && msg.id > 0 && (
+            <button
+              className="invisible rounded px-1 hover:bg-muted group-hover:visible"
+              onClick={() => onInspect(msg)}
+              title="What was sent to the model for this reply"
+            >
+              inspect
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -125,12 +137,15 @@ interface Props {
   // The chat opened by App via OpenChat/StartChat. The component is
   // keyed by chatId, so a chat switch remounts it fresh.
   initial: chat.State;
+  // Developer mode (spec §9): adds the sampler panel and the per-reply
+  // context inspector.
+  dev?: boolean;
   // Called whenever this chat's content changed in a way the chat list
   // should reflect (new message, regenerate, …).
   onActivity?: () => void;
 }
 
-export default function ChatScreen({ initial, onActivity }: Props) {
+export default function ChatScreen({ initial, dev, onActivity }: Props) {
   const [state, setState] = useState<chat.State>(initial);
   const [messages, setMessages] = useState<MessageView[]>(
     initial.messages ?? []
@@ -147,6 +162,8 @@ export default function ChatScreen({ initial, onActivity }: Props) {
   const [streamText, setStreamText] = useState("");
   const [editing, setEditing] = useState<MessageView | null>(null);
   const [editText, setEditText] = useState("");
+  const [samplerOpen, setSamplerOpen] = useState(false);
+  const [inspectId, setInspectId] = useState<number | null>(null);
 
   // Token deltas are batched to state on a short timer rather than per
   // event (dev spec §2 streaming perf note). A timer, not
@@ -352,7 +369,24 @@ export default function ChatScreen({ initial, onActivity }: Props) {
         >
           Refresh
         </Button>
+        {dev && (
+          <Button
+            variant={samplerOpen ? "secondary" : "outline"}
+            size="sm"
+            onClick={() => setSamplerOpen((o) => !o)}
+          >
+            Sampler
+          </Button>
+        )}
       </div>
+
+      {dev && samplerOpen && (
+        <SamplerPanel
+          chatId={state.chatId}
+          onClose={() => setSamplerOpen(false)}
+          onError={setError}
+        />
+      )}
 
       {healthErr && (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -397,6 +431,7 @@ export default function ChatScreen({ initial, onActivity }: Props) {
               onEdit={startEdit}
               onSwipe={swipe}
               onRegenerate={regenerate}
+              onInspect={dev ? (msg) => setInspectId(msg.id) : undefined}
             />
           )
         )}
@@ -413,6 +448,14 @@ export default function ChatScreen({ initial, onActivity }: Props) {
           />
         )}
       </div>
+
+      {dev && inspectId !== null && (
+        <InspectorModal
+          chatId={state.chatId}
+          messageId={inspectId}
+          onClose={() => setInspectId(null)}
+        />
+      )}
 
       <div className="flex gap-2">
         <Input

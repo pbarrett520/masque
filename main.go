@@ -13,6 +13,7 @@ import (
 	"masque/internal/character"
 	"masque/internal/chat"
 	"masque/internal/datadir"
+	"masque/internal/devlog"
 	"masque/internal/ollamamgr"
 	"masque/internal/settings"
 	"masque/internal/store"
@@ -43,10 +44,12 @@ func run() error {
 	}()
 
 	app := NewApp()
+	requestLog := devlog.New()
 	settingsSvc := settings.NewService(st)
-	chatSvc := chat.NewService(st, app.emit)
+	chatSvc := chat.NewService(st, app.emit, requestLog)
 	characterSvc := character.NewService(st)
 	ollamaMgrSvc := ollamamgr.NewService(st, app.emit)
+	devlogSvc := devlog.NewService(requestLog)
 
 	err = wails.Run(&options.App{
 		Title:  "Masque",
@@ -63,6 +66,7 @@ func run() error {
 			chatSvc,
 			characterSvc,
 			ollamaMgrSvc,
+			devlogSvc,
 		},
 	})
 	if err != nil {

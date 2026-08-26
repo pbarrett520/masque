@@ -120,7 +120,7 @@ type chatBody struct {
 	Model         string             `json:"model"`
 	Messages      []provider.Message `json:"messages"`
 	Stream        bool               `json:"stream"`
-	StreamOptions map[string]any     `json:"stream_options"`
+	StreamOptions map[string]any     `json:"stream_options,omitempty"`
 	Temperature   *float64           `json:"temperature,omitempty"`
 	TopP          *float64           `json:"top_p,omitempty"`
 	MaxTokens     *int               `json:"max_tokens,omitempty"`
@@ -141,10 +141,13 @@ func buildChatBody(req provider.ChatRequest) (chatBody, provider.ParamReport) {
 	body := chatBody{
 		Model:    req.Model,
 		Messages: messages,
-		Stream:   true,
+		Stream:   !req.NoStream,
+	}
+	if body.Stream {
 		// Ask servers that support it to attach token usage to the
-		// final chunk; others ignore the field.
-		StreamOptions: map[string]any{"include_usage": true},
+		// final chunk; others ignore the field. Rejected alongside
+		// stream:false, so only sent when streaming.
+		body.StreamOptions = map[string]any{"include_usage": true}
 	}
 	report := provider.ParamReport{Sent: map[string]any{}, Dropped: []string{}}
 	if v := req.Params.Temperature; v != nil {
@@ -194,7 +197,21 @@ type apiError struct {
 	Message string `json:"message"`
 }
 
+// DescribeRequest implements provider.RequestDescriber: the exact
+// /chat/completions request ChatStream would send, for the context
+// inspector. The API key travels in a header, never in the body.
+func (p *Provider) DescribeRequest(req provider.ChatRequest) (provider.RequestDescription, error) {
+	body, report := buildChatBody(req)
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return provider.RequestDescription{}, fmt.Errorf("encoding chat request: %w", err)
+	}
+	return provider.RequestDescription{URL: p.baseURL + "/chat/completions", Body: raw, Report: report}, nil
+}
+
 // ChatStream implements provider.Provider via POST /chat/completions.
+// With req.NoStream the completion is requested unstreamed and arrives
+// on the channel as a single delta followed by Done.
 func (p *Provider) ChatStream(ctx context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
 	body, _ := buildChatBody(req)
 	payload, err := json.Marshal(body)
@@ -205,7 +222,9 @@ func (p *Provider) ChatStream(ctx context.Context, req provider.ChatRequest) (<-
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Accept", "text/event-stream")
+	if !req.NoStream {
+		httpReq.Header.Set("Accept", "text/event-stream")
+	}
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("opening chat stream: %w", err)
@@ -217,8 +236,65 @@ func (p *Provider) ChatStream(ctx context.Context, req provider.ChatRequest) (<-
 	}
 
 	events := make(chan provider.StreamEvent)
-	go p.readStream(ctx, resp.Body, events)
+	if req.NoStream {
+		go p.readOnce(ctx, resp.Body, events)
+	} else {
+		go p.readStream(ctx, resp.Body, events)
+	}
 	return events, nil
+}
+
+// completion is a non-streamed /chat/completions response.
+type completion struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
+	Error *apiError `json:"error"`
+}
+
+// readOnce delivers a non-streamed completion as one delta plus Done.
+func (p *Provider) readOnce(ctx context.Context, body io.ReadCloser, events chan<- provider.StreamEvent) {
+	defer close(events)
+	defer body.Close() //nolint:errcheck // read-only body
+
+	raw, err := io.ReadAll(io.LimitReader(body, maxLine))
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			err = ctxErr
+		}
+		events <- provider.StreamEvent{Err: err}
+		return
+	}
+	var c completion
+	if err := json.Unmarshal(raw, &c); err != nil {
+		events <- provider.StreamEvent{Err: fmt.Errorf("decoding completion: %w", err)}
+		return
+	}
+	if c.Error != nil {
+		events <- provider.StreamEvent{Err: fmt.Errorf("provider: %s", c.Error.Message)}
+		return
+	}
+	if len(c.Choices) == 0 {
+		events <- provider.StreamEvent{Err: fmt.Errorf("completion has no choices")}
+		return
+	}
+	var usage *provider.Usage
+	if c.Usage != nil {
+		usage = &provider.Usage{
+			PromptTokens:     c.Usage.PromptTokens,
+			CompletionTokens: c.Usage.CompletionTokens,
+		}
+	}
+	if text := c.Choices[0].Message.Content; text != "" {
+		events <- provider.StreamEvent{Delta: text}
+	}
+	events <- provider.StreamEvent{Done: true, Usage: usage}
 }
 
 // readStream pumps SSE lines from body into events, closing the channel
