@@ -49,6 +49,10 @@ func New(baseURL string) *Provider {
 // ID implements provider.Provider.
 func (p *Provider) ID() string { return "ollama" }
 
+// BaseURL reports the endpoint this provider talks to (shown by the
+// manager UI when the endpoint is unreachable).
+func (p *Provider) BaseURL() string { return p.baseURL }
+
 // HealthCheck implements provider.Provider via GET /api/version.
 func (p *Provider) HealthCheck(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/api/version", nil)

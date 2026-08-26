@@ -11,6 +11,14 @@ import {
 } from "@/components/ui/card";
 import { DBPath, Get, Set } from "../../wailsjs/go/settings/Service";
 import { Persona, SetPersona } from "../../wailsjs/go/chat/Service";
+import {
+  Delete as DeleteModel,
+  Installed,
+  Status,
+} from "../../wailsjs/go/ollamamgr/Service";
+import { EventsOn } from "../../wailsjs/runtime/runtime";
+import { ollamamgr, provider } from "../../wailsjs/go/models";
+import StarterModelList, { formatBytes } from "@/components/StarterModelList";
 
 type Theme = "light" | "dark";
 
@@ -156,6 +164,94 @@ function PersonaCard({ onStatus }: { onStatus: (s: string) => void }) {
   );
 }
 
+// LocalModelsCard is the simple-mode Ollama manager (dev spec §8):
+// endpoint status, installed models with delete, and the curated
+// starter roster with one-click pulls. The full manager (all quants,
+// pull-by-name, HF refs, VRAM) arrives with dev mode in M1.7.
+function LocalModelsCard({ onStatus }: { onStatus: (s: string) => void }) {
+  const [status, setStatus] = useState<ollamamgr.Status | null>(null);
+  const [installed, setInstalled] = useState<provider.ModelInfo[]>([]);
+
+  const refresh = async () => {
+    try {
+      const s = await Status();
+      setStatus(s);
+      setInstalled(s.reachable ? ((await Installed()) ?? []) : []);
+    } catch (err) {
+      onStatus(String(err));
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+    // A finished pull changes the installed list.
+    const off = EventsOn("ollama:pull", (p: { done: boolean; error: string }) => {
+      if (p.done) void refresh();
+    });
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const remove = async (m: provider.ModelInfo) => {
+    if (!window.confirm(`Delete ${m.id}? This frees ${formatBytes(m.size)} on disk.`)) {
+      return;
+    }
+    try {
+      await DeleteModel(m.id);
+      onStatus(`Deleted ${m.id}.`);
+      void refresh();
+    } catch (err) {
+      onStatus(String(err));
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Local models</CardTitle>
+        <CardDescription>
+          {status === null
+            ? "Checking Ollama…"
+            : status.reachable
+              ? `Ollama ${status.version} at ${status.baseUrl}`
+              : `Ollama isn't reachable at ${status.baseUrl} — is it running?`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {status?.reachable && installed.length > 0 && (
+          <div className="space-y-1">
+            <p className="text-sm font-medium">Installed</p>
+            {installed.map((m) => (
+              <div
+                key={m.id}
+                className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
+              >
+                <span className="truncate">{m.id}</span>
+                <span className="flex-1" />
+                <span className="text-xs text-muted-foreground">
+                  {formatBytes(m.size)}
+                </span>
+                <button
+                  className="text-xs text-destructive hover:underline"
+                  onClick={() => void remove(m)}
+                >
+                  delete
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {status?.reachable && (
+          <div className="space-y-1">
+            <p className="text-sm font-medium">Recommended for roleplay</p>
+            <StarterModelList onError={onStatus} />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SettingsScreen({ theme, onThemeChange }: Props) {
   const [dbPath, setDbPath] = useState("");
   const [status, setStatus] = useState("");
@@ -189,6 +285,8 @@ export default function SettingsScreen({ theme, onThemeChange }: Props) {
           />
         </CardContent>
       </Card>
+
+      <LocalModelsCard onStatus={setStatus} />
 
       <Card>
         <CardHeader>

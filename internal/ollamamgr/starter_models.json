@@ -1,0 +1,41 @@
+{
+  "comment": "Curated starter models (dev spec §8). Data file so the roster can change per release without code changes. Refs must be pullable by a stock Ollama install: registry tags or hf.co GGUF refs. downloadBytes is the Q4_K_M download size; minRamBytes is a conservative total-RAM guide (weights + KV cache + OS headroom). Roster researched Aug 2026: Mag Mell R1 is the community-favorite 12B (HammerAI's most-pulled model); Stheno v3.2 the perennial 8B entry pick; Impish LLAMA 4B the rare RP-specific small model; Cydonia the current 24B-class favorite.",
+  "models": [
+    {
+      "ref": "hf.co/SicariusSicariiStuff/Impish_LLAMA_4B_GGUF:Q4_K_M",
+      "name": "Impish LLAMA",
+      "params": "4B",
+      "description": "Small and quick, made for roleplay. Runs on almost anything — the pick for laptops without a big GPU.",
+      "downloadBytes": 2780000000,
+      "minRamBytes": 8589934592,
+      "recommended": false
+    },
+    {
+      "ref": "fluffy/l3-8b-stheno-v3.2:q4_K_M",
+      "name": "Stheno v3.2",
+      "params": "8B",
+      "description": "The classic starter roleplay model — dependable character voice, good pace on mid-range machines.",
+      "downloadBytes": 4920000000,
+      "minRamBytes": 12884901888,
+      "recommended": false
+    },
+    {
+      "ref": "HammerAI/mn-mag-mell-r1:12b-q4_K_M",
+      "name": "Mag Mell R1",
+      "params": "12B",
+      "description": "The community favorite for immersive roleplay — rich prose and strong character consistency.",
+      "downloadBytes": 7480000000,
+      "minRamBytes": 17179869184,
+      "recommended": true
+    },
+    {
+      "ref": "hf.co/bartowski/TheDrummer_Cydonia-24B-v4.3-GGUF:Q4_K_M",
+      "name": "Cydonia",
+      "params": "24B",
+      "description": "Big-machine pick: deeper, more nuanced writing if you have the memory for it.",
+      "downloadBytes": 14330000000,
+      "minRamBytes": 34359738368,
+      "recommended": false
+    }
+  ]
+}

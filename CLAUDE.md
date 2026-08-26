@@ -35,7 +35,7 @@ Each step ends in a runnable app; resist reordering.
 3. **M1.3 — done**: OpenAI-compat + Anthropic providers, mid-chat provider switch. OpenAI-compat is live-testable keyless against Ollama's /v1 (`go test -tags openai_integration ./internal/provider/openai/`); Anthropic has an integration test behind `anthropic_integration` awaiting a real key
 4. **M1.4 — done**: Card import (PNG/JSON, V2+V3) + characters screen. Committed fixtures in `internal/card/testdata/` are all original/synthetic (regenerate via `go generate ./internal/card`); real-world cards go in the **gitignored** `internal/card/testdata/smoke/` dir, which the smoke test picks up as independent data — never commit third-party cards
 5. **M1.5 — done**: Chat polish (swipes, edit, regenerate, persona, chat list/resume). Swipe siblings share `messages.swipe_group` with exactly one active member; alternate greetings seed as a swipe group; default persona row falls back to the legacy `user.display_name` setting
-6. M1.6: Ollama manager + onboarding
+6. **M1.6 — done**: Ollama manager + onboarding. Manager endpoints (pull/delete/ps/version) live on the ollama provider; `internal/ollamamgr` is the bound service (pull progress via the `ollama:pull` event, one pull at a time). Curated roster is embedded `internal/ollamamgr/starter_models.json` (data file — revise per release); RAM-fit heuristic via `internal/sysinfo` (x/sys, no cgo). First-run wizard shows only when both `onboarding.done` and `provider.default_model` are unset; test fresh-install flows by pointing `XDG_DATA_HOME` at a temp dir under `wails dev`
 7. M1.7: Dev mode (context inspector, sampler panel, endpoint config, log view)
 8. M1.8: Packaging (AppImage/.deb, NSIS, dmg)
 

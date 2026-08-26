@@ -12,6 +12,7 @@ import {
 import { chat, store } from "../wailsjs/go/models";
 import CharactersScreen from "./screens/CharactersScreen";
 import ChatScreen from "./screens/ChatScreen";
+import OnboardingScreen from "./screens/OnboardingScreen";
 import SettingsScreen from "./screens/SettingsScreen";
 
 type Theme = "light" | "dark";
@@ -34,6 +35,8 @@ function timeAgo(unixSeconds: number): string {
 export default function App() {
   const [view, setView] = useState<View>("characters");
   const [theme, setTheme] = useState<Theme>("dark");
+  // null = still deciding; true = show the first-run wizard.
+  const [onboarding, setOnboarding] = useState<boolean | null>(null);
   const [chatState, setChatState] = useState<chat.State | null>(null);
   const [chats, setChats] = useState<store.ChatListItem[]>([]);
   const [error, setError] = useState("");
@@ -45,18 +48,9 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (initRef.current) return; // StrictMode double-mount guard
-    initRef.current = true;
-    Get(THEME_KEY)
-      .then((stored) => {
-        const t: Theme = stored === "light" ? "light" : "dark";
-        setTheme(t);
-        applyTheme(t);
-      })
-      .catch(() => applyTheme("dark"));
-    // Resume the last active chat; a zero chatId means nothing to
-    // resume, so stay on the characters screen.
+  // Resume the last active chat; a zero chatId means nothing to
+  // resume, so stay on the characters screen.
+  const resume = useCallback(() => {
     StartChat()
       .then((s) => {
         if (s.chatId) {
@@ -67,6 +61,39 @@ export default function App() {
       .catch((err) => setError(`Failed to resume chat: ${err}`));
     refreshChats();
   }, [refreshChats]);
+
+  useEffect(() => {
+    if (initRef.current) return; // StrictMode double-mount guard
+    initRef.current = true;
+    Get(THEME_KEY)
+      .then((stored) => {
+        const t: Theme = stored === "light" ? "light" : "dark";
+        setTheme(t);
+        applyTheme(t);
+      })
+      .catch(() => applyTheme("dark"));
+    // First run (no completed onboarding, no default model) gets the
+    // wizard; anything else — including pre-onboarding installs, which
+    // have a default model — goes straight to the app.
+    Promise.all([Get("onboarding.done"), Get("provider.default_model")])
+      .then(([done, model]) => {
+        if (!done && !model) {
+          setOnboarding(true);
+        } else {
+          setOnboarding(false);
+          resume();
+        }
+      })
+      .catch(() => {
+        setOnboarding(false);
+        resume();
+      });
+  }, [resume]);
+
+  const finishOnboarding = useCallback(() => {
+    setOnboarding(false);
+    resume();
+  }, [resume]);
 
   const applyState = (s: chat.State) => {
     setChatState(s);
@@ -120,6 +147,19 @@ export default function App() {
       {label}
     </Button>
   );
+
+  if (onboarding !== false) {
+    return (
+      <div className="flex h-screen flex-col bg-background text-foreground">
+        <header className="flex items-center gap-4 border-b border-border px-6 py-3">
+          <h1 className="text-lg font-semibold tracking-tight">Masque</h1>
+        </header>
+        <main className="min-h-0 flex-1">
+          {onboarding && <OnboardingScreen onDone={finishOnboarding} />}
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
