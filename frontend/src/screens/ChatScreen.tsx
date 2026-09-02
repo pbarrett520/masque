@@ -16,6 +16,7 @@ import {
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import { chat, provider } from "../../wailsjs/go/models";
 import { InspectorModal, SamplerPanel } from "@/components/DevPanels";
+import { Markdown } from "@/components/Markdown";
 
 interface MessageView {
   id: number;
@@ -63,13 +64,13 @@ function Bubble({
       <div className="max-w-[85%]">
         <div
           className={
-            "whitespace-pre-wrap rounded-lg px-3 py-2 text-sm " +
+            "rounded-lg px-3 py-2 text-sm " +
             (isUser
               ? "bg-primary text-primary-foreground"
               : "bg-muted text-foreground")
           }
         >
-          {msg.content}
+          <Markdown text={msg.content} />
           {msg.truncated && (
             <div className="mt-1 text-xs italic opacity-70">(cut short)</div>
           )}
