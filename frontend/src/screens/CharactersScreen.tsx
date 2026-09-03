@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
   Card,
@@ -113,18 +114,23 @@ export default function CharactersScreen({ onOpen }: Props) {
   const field = (
     key: keyof typeof form,
     label: string,
-    placeholder: string
-  ) => (
-    <div className="space-y-1.5">
-      <Label htmlFor={`create-${key}`}>{label}</Label>
-      <Input
-        id={`create-${key}`}
-        value={form[key]}
-        placeholder={placeholder}
-        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-      />
-    </div>
-  );
+    placeholder: string,
+    multiline = true
+  ) => {
+    const Control = multiline ? Textarea : Input;
+    return (
+      <div className="space-y-1.5">
+        <Label htmlFor={`create-${key}`}>{label}</Label>
+        <Control
+          id={`create-${key}`}
+          className={multiline ? "max-h-64" : undefined}
+          value={form[key]}
+          placeholder={placeholder}
+          onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+        />
+      </div>
+    );
+  };
 
   return (
     <div
@@ -182,7 +188,7 @@ export default function CharactersScreen({ onOpen }: Props) {
             <CardTitle>New character</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {field("name", "Name", "Required")}
+            {field("name", "Name", "Required", false)}
             {field("description", "Description", "Who are they?")}
             {field("personality", "Personality", "A few traits")}
             {field("scenario", "Scenario", "Where does the story start?")}

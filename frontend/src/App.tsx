@@ -195,7 +195,7 @@ export default function App() {
             switches; ChatScreen is keyed by chatId so switching chats
             remounts it. */}
         {chatState && (
-          <div className={view === "chat" ? "flex h-full gap-4" : "hidden"}>
+          <div className={view === "chat" ? "mx-auto flex h-full w-full max-w-6xl gap-6" : "hidden"}>
             <aside className="flex w-52 shrink-0 flex-col gap-2 overflow-y-auto">
               <Button variant="outline" size="sm" onClick={newChat}>
                 New chat

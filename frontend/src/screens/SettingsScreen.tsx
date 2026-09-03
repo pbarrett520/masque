@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
   Card,
@@ -149,9 +150,9 @@ function PersonaCard({ onStatus }: { onStatus: (s: string) => void }) {
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="persona-description">Description</Label>
-          <textarea
+          <Textarea
             id="persona-description"
-            className="min-h-20 w-full rounded-md border border-input bg-transparent p-2 text-sm shadow-xs"
+            className="max-h-64 min-h-20"
             value={description}
             placeholder="A few words about who the characters are talking to (optional)"
             disabled={!loaded}
@@ -265,7 +266,7 @@ export default function SettingsScreen({ theme, onThemeChange, dev, onDevChange 
   }, []);
 
   return (
-    <div className="mx-auto max-w-xl space-y-6">
+    <div className="mx-auto max-w-2xl space-y-6">
       <PersonaCard onStatus={setStatus} />
 
       <Card>

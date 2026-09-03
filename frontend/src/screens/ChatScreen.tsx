@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Health,
   ListModels,
@@ -327,7 +327,7 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
     messages.some((m) => m.role === "user");
 
   return (
-    <div className="mx-auto flex h-full max-w-2xl flex-col gap-3">
+    <div className="flex h-full flex-col gap-3">
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium">{state.characterName}</span>
         <span className="flex-1" />
@@ -407,8 +407,8 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
         {messages.map((m, i) =>
           editing && editing.id === m.id ? (
             <div key={m.id} className="space-y-1.5">
-              <textarea
-                className="min-h-24 w-full rounded-md border border-input bg-background p-2 text-sm"
+              <Textarea
+                className="max-h-96 min-h-24 bg-background"
                 value={editText}
                 autoFocus
                 onChange={(e) => setEditText(e.target.value)}
@@ -458,15 +458,21 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
         />
       )}
 
-      <div className="flex gap-2">
-        <Input
+      <div className="flex items-end gap-2">
+        <Textarea
+          className="max-h-48"
           value={input}
           placeholder={
-            state.model ? "Say something…" : "Select a model to start"
+            state.model ? "Say something… (Shift+Enter for a new line)" : "Select a model to start"
           }
           disabled={streaming || !state.model}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
         />
         {streaming ? (
           <Button variant="outline" onClick={() => Stop(state.chatId)}>
