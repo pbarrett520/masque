@@ -71,3 +71,24 @@ func TestSetNilDeletes(t *testing.T) {
 		t.Errorf("got %v after delete, want nil", v)
 	}
 }
+
+func TestDeleteRemovesKey(t *testing.T) {
+	svc := newTestService(t)
+	if err := svc.Set("k", "v"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Delete("k"); err != nil {
+		t.Fatal(err)
+	}
+	v, err := svc.Get("k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != nil {
+		t.Errorf("got %v after Delete, want nil", v)
+	}
+	// Deleting an absent key is not an error.
+	if err := svc.Delete("k"); err != nil {
+		t.Errorf("Delete of absent key: %v", err)
+	}
+}

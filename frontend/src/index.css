@@ -1,52 +1,69 @@
 @import "tailwindcss";
 
+/* Bundled type (no network: Masque is local-first). Literata carries the
+   character's voice and titles; Instrument Sans is the chrome; JetBrains
+   Mono is reserved for identifiers and JSON in developer surfaces. */
+@import "@fontsource-variable/literata/opsz.css";
+@import "@fontsource-variable/literata/opsz-italic.css";
+@import "@fontsource-variable/instrument-sans/wght.css";
+@import "@fontsource-variable/instrument-sans/wght-italic.css";
+@import "@fontsource-variable/jetbrains-mono/wght.css";
+
 @custom-variant dark (&:is(.dark *));
 
+/* Palette: "Backstage". The house is a plum-black, not a tinted grey;
+   surfaces are velvet; text is limelight; one gilt accent marks what is
+   live (active tab, open chat, the speaking character, focus). Light mode
+   is the same theatre with the house lights up. */
 :root {
   color-scheme: light;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --background: oklch(0.965 0.006 315);
+  --foreground: oklch(0.22 0.03 315);
+  --card: oklch(0.99 0.003 315);
+  --card-foreground: oklch(0.22 0.03 315);
+  --popover: oklch(0.99 0.003 315);
+  --popover-foreground: oklch(0.22 0.03 315);
+  --primary: oklch(0.25 0.035 315);
+  --primary-foreground: oklch(0.97 0.006 80);
+  --secondary: oklch(0.915 0.01 315);
+  --secondary-foreground: oklch(0.22 0.03 315);
+  --muted: oklch(0.93 0.008 315);
+  --muted-foreground: oklch(0.47 0.022 315);
+  --accent: oklch(0.915 0.01 315);
+  --accent-foreground: oklch(0.22 0.03 315);
+  --destructive: oklch(0.54 0.2 25);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --radius: 0.625rem;
+  --border: oklch(0.86 0.012 315);
+  --input: oklch(0.84 0.014 315);
+  --gilt: oklch(0.46 0.11 75);
+  --gilt-foreground: oklch(0.985 0.005 80);
+  --ring: var(--gilt);
+  --radius: 0.375rem;
 }
 
 .dark {
   color-scheme: dark;
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --background: oklch(0.16 0.018 315);
+  --foreground: oklch(0.93 0.012 80);
+  --card: oklch(0.205 0.022 315);
+  --card-foreground: oklch(0.93 0.012 80);
+  --popover: oklch(0.225 0.022 315);
+  --popover-foreground: oklch(0.93 0.012 80);
+  --primary: oklch(0.93 0.012 80);
+  --primary-foreground: oklch(0.18 0.02 315);
+  --secondary: oklch(0.28 0.025 315);
+  --secondary-foreground: oklch(0.93 0.012 80);
+  --muted: oklch(0.255 0.024 315);
+  --muted-foreground: oklch(0.70 0.016 315);
+  --accent: oklch(0.255 0.024 315);
+  --accent-foreground: oklch(0.93 0.012 80);
+  --destructive: oklch(0.66 0.19 25);
+  --destructive-foreground: oklch(0.16 0.018 315);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 13%);
+  --gilt: oklch(0.78 0.11 85);
+  --gilt-foreground: oklch(0.18 0.02 315);
+  --ring: var(--gilt);
 }
 
 @theme inline {
@@ -69,18 +86,28 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --color-gilt: var(--gilt);
+  --color-gilt-foreground: var(--gilt-foreground);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+  --font-sans: "Instrument Sans Variable", "Instrument Sans", "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-serif: "Literata Variable", Literata, Charter, "Iowan Old Style", Georgia, serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    font-size: 15px;
+  }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
     user-select: none;
     cursor: default;
   }
@@ -88,21 +115,95 @@
   textarea {
     user-select: text;
   }
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+  }
   /* Native <select> popups in WebKitGTK paint options on their own surface
      and don't inherit the page palette; set both sides explicitly so dark
      mode never yields light-on-light. */
   select {
     color: var(--foreground);
-    background-color: var(--background);
+    background-color: var(--card);
   }
   option {
     color: var(--popover-foreground);
     background-color: var(--popover);
   }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--foreground) 14%, transparent);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--foreground) 24%, transparent);
+    background-clip: padding-box;
+  }
 }
 
-/* Chat message markdown. Colors inherit from the bubble so the same rules
-   work on the primary (user) and muted (assistant) surfaces. */
+@utility font-title {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-optical-sizing: auto;
+  letter-spacing: -0.005em;
+}
+
+/* The character's voice: the only text in the app set for reading. */
+.voice {
+  font-family: var(--font-serif);
+  font-optical-sizing: auto;
+  font-size: 1.0667rem; /* 16px */
+  line-height: 1.6;
+  max-width: 66ch;
+}
+.voice .markdown em {
+  opacity: 0.8;
+}
+.voice .markdown p {
+  line-height: inherit;
+}
+.voice .markdown > * + * {
+  margin-top: 0.7em;
+}
+
+/* Streaming caret: the one piece of self-started motion in the app. It
+   sits at the end of the last streamed block, or alone while the first
+   token is still on its way. */
+.caret::after,
+.caret-in .markdown > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 0.48em;
+  height: 0.95em;
+  margin-left: 0.1em;
+  vertical-align: -0.12em;
+  background: var(--gilt);
+  animation: caret-blink 1.1s steps(2, jump-none) infinite;
+}
+@keyframes caret-blink {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .caret::after,
+  .caret-in .markdown > :last-child::after {
+    animation: none;
+  }
+}
+
+/* Chat message markdown. Colors inherit from the surface so the same rules
+   work on the user's panel and the character's column. */
 .markdown {
   user-select: text;
   cursor: auto;
@@ -116,7 +217,6 @@
 }
 .markdown em {
   font-style: italic;
-  opacity: 0.85;
 }
 .markdown strong {
   font-weight: 600;
@@ -152,19 +252,19 @@
   margin-top: 0.15em;
 }
 .markdown blockquote {
-  border-left: 3px solid currentColor;
+  border-left: 2px solid var(--gilt);
   padding-left: 0.75em;
-  opacity: 0.8;
+  opacity: 0.85;
 }
 .markdown code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.9em;
-  background: color-mix(in oklch, currentColor 12%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: color-mix(in oklch, currentColor 10%, transparent);
   border-radius: 0.25rem;
   padding: 0.1em 0.3em;
 }
 .markdown pre {
-  background: color-mix(in oklch, currentColor 10%, transparent);
+  background: color-mix(in oklch, currentColor 8%, transparent);
   border-radius: 0.375rem;
   padding: 0.6em 0.75em;
   overflow-x: auto;
@@ -172,16 +272,17 @@
 .markdown pre code {
   background: none;
   padding: 0;
-  font-size: 0.85em;
+  font-size: 0.82em;
 }
 .markdown a {
   text-decoration: underline;
   text-underline-offset: 2px;
+  text-decoration-color: var(--gilt);
 }
 .markdown hr {
   border: 0;
   border-top: 1px solid currentColor;
-  opacity: 0.3;
+  opacity: 0.25;
 }
 .markdown table {
   border-collapse: collapse;

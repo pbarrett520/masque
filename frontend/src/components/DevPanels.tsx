@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Inspect, Params, SetParams } from "../../wailsjs/go/chat/Service";
 import { chat, provider } from "../../wailsjs/go/models";
 
@@ -72,13 +73,13 @@ export function SamplerPanel({
   };
 
   const field = (key: string, label: string, placeholder: string) => (
-    <div className="space-y-0.5">
-      <Label htmlFor={`sampler-${key}`} className="text-xs">
+    <div className="space-y-1">
+      <Label htmlFor={`sampler-${key}`} className="font-mono text-xs font-normal text-muted-foreground">
         {label}
       </Label>
-      <input
+      <Input
         id={`sampler-${key}`}
-        className="h-7 w-full rounded-md border border-input bg-background px-2 text-sm"
+        className="h-8 bg-background font-mono text-[0.8667rem]"
         value={draft[key] ?? ""}
         placeholder={placeholder}
         disabled={!loaded}
@@ -89,11 +90,11 @@ export function SamplerPanel({
 
   return (
     <div className="rounded-md border border-border bg-card p-3">
-      <div className="mb-2 flex items-center">
-        <span className="text-sm font-medium">Sampler overrides (this chat)</span>
+      <div className="mb-3 flex items-baseline gap-3">
+        <span className="text-sm font-medium">Sampler overrides for this chat</span>
         <span className="flex-1" />
         <span className="text-xs text-muted-foreground">
-          Blank = model default. Unsupported params are dropped per provider.
+          Blank means the model's default. Unsupported params are dropped per provider.
         </span>
       </div>
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
@@ -159,19 +160,21 @@ export function InspectorModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
       onClick={onClose}
     >
       <div
-        className="flex max-h-full w-full max-w-3xl flex-col rounded-lg border border-border bg-background shadow-lg"
+        role="dialog"
+        aria-label="Context inspector"
+        className="flex max-h-full w-full max-w-3xl flex-col rounded-lg border border-border bg-popover"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 border-b border-border px-4 py-2">
-          <span className="font-medium">Context inspector</span>
+        <div className="flex items-center gap-3 border-b border-border px-4 py-2.5">
+          <span className="font-title text-lg leading-none">Context inspector</span>
           {insp && (
-            <span className="text-xs text-muted-foreground">
-              {insp.providerId} · {insp.model}
-              {insp.noStream ? " · non-streaming" : ""}
+            <span className="truncate font-mono text-xs text-muted-foreground">
+              {insp.providerId} {insp.model}
+              {insp.noStream ? " (non-streaming)" : ""}
             </span>
           )}
           <span className="flex-1" />
@@ -179,72 +182,81 @@ export function InspectorModal({
             Close
           </Button>
         </div>
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
           {error && <p className="text-sm text-muted-foreground">{error}</p>}
           {insp && (
             <>
-              <div className="text-sm text-muted-foreground">
-                Budget: context {insp.contextWindow} − reserved {insp.reservedOutput}{" "}
-                · system ≈{insp.systemTokens} tok · history ≈{insp.historyTokens} tok
-                {insp.droppedMessages > 0 && (
-                  <span className="text-amber-500">
-                    {" "}
-                    · {insp.droppedMessages} older message
-                    {insp.droppedMessages === 1 ? "" : "s"} truncated
-                  </span>
-                )}
-              </div>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-sm">
+                <dt className="text-muted-foreground">Context window</dt>
+                <dd className="tabular-nums">{insp.contextWindow} tokens</dd>
+                <dt className="text-muted-foreground">Reserved for output</dt>
+                <dd className="tabular-nums">{insp.reservedOutput} tokens</dd>
+                <dt className="text-muted-foreground">System</dt>
+                <dd className="tabular-nums">about {insp.systemTokens} tokens</dd>
+                <dt className="text-muted-foreground">History</dt>
+                <dd className="tabular-nums">
+                  about {insp.historyTokens} tokens
+                  {insp.droppedMessages > 0 && (
+                    <span className="text-destructive">
+                      {" "}
+                      ({insp.droppedMessages} older message
+                      {insp.droppedMessages === 1 ? "" : "s"} truncated)
+                    </span>
+                  )}
+                </dd>
+              </dl>
 
               <div>
                 <p className="mb-1 text-sm font-medium">Segments</p>
-                <div className="overflow-hidden rounded-md border border-border">
+                <ul className="divide-y divide-border rounded-md border border-border">
                   {(insp.segments ?? []).map((seg, i) => (
-                    <div key={i} className="border-b border-border last:border-b-0">
+                    <li key={i}>
                       <button
-                        className="flex w-full items-center gap-2 px-2 py-1 text-left text-sm hover:bg-muted/50"
+                        className="flex w-full items-center gap-3 px-3 py-1.5 text-left text-sm hover:bg-accent/60"
+                        aria-expanded={openSegment === i}
                         onClick={() => setOpenSegment(openSegment === i ? -1 : i)}
                       >
-                        <span className="w-14 shrink-0 text-xs text-muted-foreground">
+                        <span className="w-16 shrink-0 text-xs text-muted-foreground">
                           {seg.name}
                         </span>
                         <span className="truncate font-mono text-xs">{seg.source}</span>
                         <span className="flex-1" />
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          ≈{seg.tokens} tok
+                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                          about {seg.tokens} tokens
                         </span>
                       </button>
                       {openSegment === i && (
-                        <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-border bg-muted/30 p-2 text-xs">
+                        <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-border bg-background p-3 font-mono text-xs">
                           {seg.content}
                         </pre>
                       )}
-                    </div>
+                    </li>
                   ))}
-                </div>
+                </ul>
               </div>
 
               <div>
                 <p className="mb-1 text-sm font-medium">Sampler params</p>
                 <p className="text-sm text-muted-foreground">
-                  sent:{" "}
+                  Sent:{" "}
                   <span className="font-mono text-xs">
                     {insp.paramReport && Object.keys(insp.paramReport.sent ?? {}).length
                       ? JSON.stringify(insp.paramReport.sent)
                       : "none (model defaults)"}
                   </span>
-                  {insp.paramReport?.dropped?.length ? (
-                    <>
-                      {" · "}dropped (unsupported):{" "}
-                      <span className="font-mono text-xs text-amber-500">
-                        {insp.paramReport.dropped.join(", ")}
-                      </span>
-                    </>
-                  ) : null}
                 </p>
+                {insp.paramReport?.dropped?.length ? (
+                  <p className="text-sm text-muted-foreground">
+                    Dropped as unsupported:{" "}
+                    <span className="font-mono text-xs text-destructive">
+                      {insp.paramReport.dropped.join(", ")}
+                    </span>
+                  </p>
+                ) : null}
               </div>
 
               <div>
-                <div className="mb-1 flex items-center gap-2">
+                <div className="mb-1 flex items-center gap-3">
                   <p className="text-sm font-medium">Raw request</p>
                   {insp.requestUrl && (
                     <span className="truncate font-mono text-xs text-muted-foreground">
@@ -256,7 +268,7 @@ export function InspectorModal({
                     {copied ? "Copied" : "Copy JSON"}
                   </Button>
                 </div>
-                <pre className="max-h-64 overflow-auto rounded-md border border-border bg-muted/30 p-2 text-xs">
+                <pre className="max-h-64 overflow-auto rounded-md border border-border bg-background p-3 font-mono text-xs">
                   {rawJSON}
                 </pre>
               </div>

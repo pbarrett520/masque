@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ButtonHTMLAttributes } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Select } from "@/components/ui/select";
 import {
   Health,
   ListModels,
@@ -38,8 +39,11 @@ interface DonePayload {
 
 interface BubbleProps {
   msg: MessageView;
+  // Who is speaking, shown above a character turn.
+  name: string;
   isLast?: boolean;
   busy?: boolean;
+  streaming?: boolean;
   canRegenerate?: boolean;
   onEdit?: (msg: MessageView) => void;
   onSwipe?: (msg: MessageView, direction: number) => void;
@@ -47,10 +51,36 @@ interface BubbleProps {
   onInspect?: (msg: MessageView) => void;
 }
 
+// A quiet text action under a turn. Hidden until the turn is hovered
+// unless `always` is set (swipes and regenerate stay visible on the
+// latest reply so the primary loop is discoverable).
+function TurnAction({
+  children,
+  always,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { always?: boolean }) {
+  return (
+    <button
+      className={
+        "rounded-sm px-1 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 disabled:opacity-40 disabled:hover:text-muted-foreground " +
+        (always ? "" : "invisible group-hover:visible focus-visible:visible")
+      }
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+// A turn in the script. The character's voice is set as prose in the
+// reading column with their name in gilt above; the user's line is a
+// velvet panel on the right.
 function Bubble({
   msg,
+  name,
   isLast,
   busy,
+  streaming,
   canRegenerate,
   onEdit,
   onSwipe,
@@ -59,77 +89,89 @@ function Bubble({
 }: BubbleProps) {
   const isUser = msg.role === "user";
   const hasSwipes = isLast && msg.swipeCount > 1;
-  return (
-    <div className={"group " + (isUser ? "flex justify-end" : "flex justify-start")}>
-      <div className="max-w-[85%]">
-        <div
-          className={
-            "rounded-lg px-3 py-2 text-sm " +
-            (isUser
-              ? "bg-primary text-primary-foreground"
-              : "bg-muted text-foreground")
-          }
+
+  const actions = (
+    <div
+      className={
+        "mt-1 flex min-h-5 items-center gap-2 " + (isUser ? "justify-end" : "")
+      }
+    >
+      {hasSwipes && onSwipe && (
+        <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
+          <TurnAction
+            always
+            aria-label="Previous version"
+            disabled={busy || msg.swipeIndex <= 1}
+            onClick={() => onSwipe(msg, -1)}
+          >
+            ‹
+          </TurnAction>
+          <span className="tabular-nums">
+            {msg.swipeIndex} of {msg.swipeCount}
+          </span>
+          <TurnAction
+            always
+            aria-label="Next version"
+            disabled={busy || msg.swipeIndex >= msg.swipeCount}
+            onClick={() => onSwipe(msg, 1)}
+          >
+            ›
+          </TurnAction>
+        </span>
+      )}
+      {isLast && canRegenerate && onRegenerate && (
+        <TurnAction
+          always
+          disabled={busy}
+          onClick={onRegenerate}
+          title="Ask for a different reply"
         >
+          Regenerate
+        </TurnAction>
+      )}
+      {onEdit && (
+        <TurnAction disabled={busy} onClick={() => onEdit(msg)}>
+          Edit
+        </TurnAction>
+      )}
+      {onInspect && msg.role === "assistant" && msg.id > 0 && (
+        <TurnAction
+          onClick={() => onInspect(msg)}
+          title="What was sent to the model for this reply"
+        >
+          Inspect
+        </TurnAction>
+      )}
+    </div>
+  );
+
+  if (isUser) {
+    return (
+      <div className="group flex flex-col items-end">
+        <div className="max-w-[80%] rounded-lg bg-card px-4 py-2.5 text-[0.9667rem]">
           <Markdown text={msg.content} />
-          {msg.truncated && (
-            <div className="mt-1 text-xs italic opacity-70">(cut short)</div>
-          )}
         </div>
-        <div
-          className={
-            "mt-0.5 flex items-center gap-2 text-xs text-muted-foreground " +
-            (isUser ? "justify-end" : "")
-          }
-        >
-          {hasSwipes && onSwipe && (
-            <span className="flex items-center gap-1">
-              <button
-                className="rounded px-1 hover:bg-muted disabled:opacity-40"
-                disabled={busy || msg.swipeIndex <= 1}
-                onClick={() => onSwipe(msg, -1)}
-              >
-                ◀
-              </button>
-              {msg.swipeIndex}/{msg.swipeCount}
-              <button
-                className="rounded px-1 hover:bg-muted disabled:opacity-40"
-                disabled={busy || msg.swipeIndex >= msg.swipeCount}
-                onClick={() => onSwipe(msg, 1)}
-              >
-                ▶
-              </button>
-            </span>
-          )}
-          {isLast && canRegenerate && onRegenerate && (
-            <button
-              className="rounded px-1 hover:bg-muted disabled:opacity-40"
-              disabled={busy}
-              onClick={onRegenerate}
-              title="Regenerate this reply"
-            >
-              ↻ regenerate
-            </button>
-          )}
-          {onEdit && (
-            <button
-              className="invisible rounded px-1 hover:bg-muted group-hover:visible"
-              disabled={busy}
-              onClick={() => onEdit(msg)}
-            >
-              edit
-            </button>
-          )}
-          {onInspect && msg.role === "assistant" && msg.id > 0 && (
-            <button
-              className="invisible rounded px-1 hover:bg-muted group-hover:visible"
-              onClick={() => onInspect(msg)}
-              title="What was sent to the model for this reply"
-            >
-              inspect
-            </button>
-          )}
-        </div>
+        {actions}
       </div>
+    );
+  }
+
+  return (
+    <div className="group">
+      <div className="mb-1 text-[0.8667rem] font-medium text-gilt">{name}</div>
+      <div className={"voice " + (streaming ? "caret-in" : "")}>
+        {msg.content ? (
+          <Markdown text={msg.content} />
+        ) : (
+          <p className="caret" aria-label="Waiting for the first words" />
+        )}
+        {msg.truncated && (
+          <p className="mt-1 font-sans text-xs italic text-muted-foreground">
+            Cut short
+          </p>
+        )}
+      </div>
+      {actions}
     </div>
   );
 }
@@ -327,12 +369,13 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
     messages.some((m) => m.role === "user");
 
   return (
-    <div className="flex h-full flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium">{state.characterName}</span>
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-2 pb-3">
+        <h2 className="font-title text-xl leading-none">{state.characterName}</h2>
         <span className="flex-1" />
-        <select
-          className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+        <Select
+          className="h-8"
+          aria-label="Provider"
           value={providerSel}
           onChange={(e) => pickProvider(e.target.value)}
           disabled={streaming}
@@ -343,9 +386,10 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
               {p.needsKey ? " (needs API key)" : ""}
             </option>
           ))}
-        </select>
-        <select
-          className="h-8 max-w-64 rounded-md border border-input bg-background px-2 text-sm"
+        </Select>
+        <Select
+          className="h-8 max-w-64"
+          aria-label="Model"
           value={selectedModel}
           onChange={(e) => pickModel(e.target.value)}
           disabled={streaming}
@@ -362,9 +406,9 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
           {selectedModel && !models.some((m) => m.id === selectedModel) && (
             <option value={selectedModel}>{selectedModel} (missing)</option>
           )}
-        </select>
+        </Select>
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
           onClick={() => void connect(providerSel)}
         >
@@ -372,7 +416,7 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
         </Button>
         {dev && (
           <Button
-            variant={samplerOpen ? "secondary" : "outline"}
+            variant={samplerOpen ? "secondary" : "ghost"}
             size="sm"
             onClick={() => setSamplerOpen((o) => !o)}
           >
@@ -382,72 +426,82 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
       </div>
 
       {dev && samplerOpen && (
-        <SamplerPanel
-          chatId={state.chatId}
-          onClose={() => setSamplerOpen(false)}
-          onError={setError}
-        />
+        <div className="pb-3">
+          <SamplerPanel
+            chatId={state.chatId}
+            onClose={() => setSamplerOpen(false)}
+            onError={setError}
+          />
+        </div>
       )}
 
       {healthErr && (
-        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           Endpoint problem: {healthErr}
         </div>
       )}
       {error && (
-        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
       <div
         ref={scrollRef}
-        className="flex-1 space-y-3 overflow-y-auto rounded-lg border border-border bg-card p-4"
+        className="min-h-0 flex-1 overflow-y-auto border-t border-border"
       >
-        {messages.map((m, i) =>
-          editing && editing.id === m.id ? (
-            <div key={m.id} className="space-y-1.5">
-              <Textarea
-                className="max-h-96 min-h-24 bg-background"
-                value={editText}
-                autoFocus
-                onChange={(e) => setEditText(e.target.value)}
-              />
-              <div className="flex gap-2">
-                <Button size="sm" onClick={saveEdit} disabled={!editText.trim()}>
-                  Save
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setEditing(null)}>
-                  Cancel
-                </Button>
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 py-6">
+          {messages.map((m, i) =>
+            editing && editing.id === m.id ? (
+              <div key={m.id} className="space-y-2">
+                <Textarea
+                  className={
+                    "max-h-96 min-h-24 " +
+                    (m.role === "assistant" ? "voice max-w-none" : "")
+                  }
+                  value={editText}
+                  autoFocus
+                  onChange={(e) => setEditText(e.target.value)}
+                />
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={saveEdit} disabled={!editText.trim()}>
+                    Save
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                    Cancel
+                  </Button>
+                </div>
               </div>
-            </div>
-          ) : (
+            ) : (
+              <Bubble
+                key={m.id}
+                msg={m}
+                name={state.characterName}
+                isLast={i === messages.length - 1 && !streaming}
+                busy={streaming}
+                canRegenerate={canRegenerate}
+                onEdit={startEdit}
+                onSwipe={swipe}
+                onRegenerate={regenerate}
+                onInspect={dev ? (msg) => setInspectId(msg.id) : undefined}
+              />
+            )
+          )}
+          {streaming && (
             <Bubble
-              key={m.id}
-              msg={m}
-              isLast={i === messages.length - 1 && !streaming}
-              busy={streaming}
-              canRegenerate={canRegenerate}
-              onEdit={startEdit}
-              onSwipe={swipe}
-              onRegenerate={regenerate}
-              onInspect={dev ? (msg) => setInspectId(msg.id) : undefined}
+              name={state.characterName}
+              streaming
+              msg={{
+                id: -1,
+                role: "assistant",
+                content: streamText,
+                truncated: false,
+                swipeIndex: 0,
+                swipeCount: 0,
+              }}
             />
-          )
-        )}
-        {streaming && (
-          <Bubble
-            msg={{
-              id: -1,
-              role: "assistant",
-              content: streamText || "…",
-              truncated: false,
-              swipeIndex: 0,
-              swipeCount: 0,
-            }}
-          />
-        )}
+          )}
+        </div>
       </div>
 
       {dev && inspectId !== null && (
@@ -458,9 +512,9 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
         />
       )}
 
-      <div className="flex items-end gap-2">
+      <div className="mx-auto flex w-full max-w-3xl items-end gap-2 pt-3">
         <Textarea
-          className="max-h-48"
+          className="max-h-48 text-[0.9667rem]"
           value={input}
           placeholder={
             state.model ? "Say something… (Shift+Enter for a new line)" : "Select a model to start"

@@ -91,7 +91,7 @@ export default function StarterModelList({ onUse, onError }: Props) {
   }
 
   return (
-    <div className="space-y-2">
+    <ul className="divide-y divide-border">
       {models.map((m) => {
         const isPulling = pulling === m.ref;
         const pct =
@@ -99,30 +99,22 @@ export default function StarterModelList({ onUse, onError }: Props) {
             ? Math.min(100, Math.round((progress.completed / progress.total) * 100))
             : null;
         return (
-          <div
-            key={m.ref}
-            className={
-              "rounded-md border p-3 " +
-              (m.recommended ? "border-primary/60" : "border-border")
-            }
-          >
-            <div className="flex items-center gap-2">
+          <li key={m.ref} className="py-3 first:pt-0">
+            <div className="flex items-baseline gap-2">
               <span className="font-medium">{m.name}</span>
               <span className="text-xs text-muted-foreground">{m.params}</span>
               {m.recommended && (
-                <span className="rounded bg-primary/15 px-1.5 py-0.5 text-xs text-primary">
-                  recommended
-                </span>
+                <span className="text-xs font-medium text-gilt">Recommended</span>
               )}
               <span className="flex-1" />
               <span className="text-xs text-muted-foreground">
                 {formatBytes(m.downloadBytes)} download
               </span>
             </div>
-            <p className="mt-1 text-sm text-muted-foreground">{m.description}</p>
+            <p className="mt-1 max-w-prose text-sm text-muted-foreground">{m.description}</p>
             {!m.fits && (
-              <p className="mt-1 text-xs text-amber-500">
-                Needs about {formatBytes(m.minRamBytes)} of memory — this machine
+              <p className="mt-1 text-xs text-destructive">
+                Needs about {formatBytes(m.minRamBytes)} of memory. This machine
                 may be too small to run it well.
               </p>
             )}
@@ -138,16 +130,16 @@ export default function StarterModelList({ onUse, onError }: Props) {
                 </>
               ) : isPulling ? (
                 <div className="flex flex-1 items-center gap-2">
-                  <div className="h-2 flex-1 overflow-hidden rounded bg-muted">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                     <div
-                      className="h-full bg-primary transition-all"
+                      className="h-full bg-gilt transition-[width]"
                       style={{ width: `${pct ?? 0}%` }}
                     />
                   </div>
-                  <span className="w-24 text-right text-xs text-muted-foreground">
+                  <span className="w-28 text-right text-xs tabular-nums text-muted-foreground">
                     {pct !== null && progress
-                      ? `${formatBytes(progress.completed)} · ${pct}%`
-                      : (progress?.status ?? "starting…")}
+                      ? `${formatBytes(progress.completed)}, ${pct}%`
+                      : (progress?.status ?? "Starting…")}
                   </span>
                   <Button size="sm" variant="outline" onClick={() => CancelPull()}>
                     Cancel
@@ -164,9 +156,9 @@ export default function StarterModelList({ onUse, onError }: Props) {
                 </Button>
               )}
             </div>
-          </div>
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import {
   Card,
   CardContent,
@@ -9,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Set as SetSetting } from "../../wailsjs/go/settings/Service";
+import { setSetting as SetSetting } from "@/lib/settings";
 import { Status } from "../../wailsjs/go/ollamamgr/Service";
 import { Health, ListModels } from "../../wailsjs/go/chat/Service";
 import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
@@ -46,7 +47,7 @@ export default function OnboardingScreen({ onDone }: Props) {
 
   return (
     <div className="flex h-full items-start justify-center overflow-y-auto p-6">
-      <div className="w-full max-w-lg space-y-4 py-8">
+      <div className="w-full max-w-lg space-y-4 py-10">
         {step === "welcome" && (
           <WelcomeStep
             onLocal={() => setStep("local")}
@@ -93,6 +94,8 @@ export default function OnboardingScreen({ onDone }: Props) {
   );
 }
 
+// The first thing a newcomer sees: the wordmark, one line on what this
+// is, and one choice. Nothing else competes with it.
 function WelcomeStep({
   onLocal,
   onCloud,
@@ -102,42 +105,38 @@ function WelcomeStep({
   onCloud: () => void;
   onSkip: () => void;
 }) {
+  const choice =
+    "w-full rounded-md border border-border bg-card p-4 text-left transition-colors hover:border-gilt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70";
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Welcome to Masque</CardTitle>
-        <CardDescription>
-          Chat with characters, entirely on your machine. One quick choice:
-          where should the AI run?
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <button
-          className="w-full rounded-md border border-primary/60 p-3 text-left hover:bg-muted/50"
-          onClick={onLocal}
-        >
-          <div className="font-medium">On this computer (recommended)</div>
-          <div className="text-sm text-muted-foreground">
+    <div>
+      <h2 className="font-title text-[3.2rem] leading-none tracking-[-0.01em]">
+        Masque
+      </h2>
+      <p className="mt-3 max-w-prose font-serif text-lg italic leading-snug text-muted-foreground">
+        Chat with characters, entirely on your machine.
+      </p>
+      <p className="mt-8 text-sm">One quick choice: where should the AI run?</p>
+      <div className="mt-3 space-y-3">
+        <button className={choice} onClick={onLocal}>
+          <div className="font-medium">On this computer</div>
+          <div className="mt-0.5 text-sm text-muted-foreground">
             Private and free, powered by Ollama. Nothing ever leaves your
-            machine.
+            machine. Recommended.
           </div>
         </button>
-        <button
-          className="w-full rounded-md border border-border p-3 text-left hover:bg-muted/50"
-          onClick={onCloud}
-        >
+        <button className={choice} onClick={onCloud}>
           <div className="font-medium">In the cloud with my API key</div>
-          <div className="text-sm text-muted-foreground">
+          <div className="mt-0.5 text-sm text-muted-foreground">
             Use OpenRouter, OpenAI, Anthropic, or any compatible service.
           </div>
         </button>
-        <div className="pt-1 text-right">
-          <Button variant="ghost" size="sm" onClick={onSkip}>
-            Skip for now
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+      <div className="pt-3 text-right">
+        <Button variant="ghost" size="sm" onClick={onSkip}>
+          Skip for now
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -200,7 +199,7 @@ function LocalStep({
         <CardTitle>Install Ollama</CardTitle>
         <CardDescription>
           Masque uses Ollama to run models on your machine. It's a free,
-          one-time install — everything after this happens inside Masque.
+          one-time install. Everything after this happens inside Masque.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -208,7 +207,7 @@ function LocalStep({
           <li>
             Download and run the installer from{" "}
             <button
-              className="text-primary underline"
+              className="underline decoration-gilt underline-offset-2 hover:text-gilt"
               onClick={() => BrowserOpenURL("https://ollama.com/download")}
             >
               ollama.com/download
@@ -219,7 +218,7 @@ function LocalStep({
         </ol>
         <div className="flex gap-2">
           <Button onClick={() => void probe(true)} disabled={checking}>
-            {checking ? "Checking…" : "I've installed it — check again"}
+            {checking ? "Checking…" : "I've installed it, check again"}
           </Button>
           <Button variant="ghost" onClick={onBack}>
             Back
@@ -292,9 +291,9 @@ function CloudStep({
       <CardContent className="space-y-3">
         <div className="space-y-1.5">
           <Label htmlFor="ob-provider">Provider</Label>
-          <select
+          <Select
             id="ob-provider"
-            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+            className="w-full"
             value={providerId}
             onChange={(e) => {
               setProviderId(e.target.value);
@@ -305,7 +304,7 @@ function CloudStep({
           >
             <option value="openai">OpenAI-compatible (OpenRouter, LM Studio, …)</option>
             <option value="anthropic">Anthropic</option>
-          </select>
+          </Select>
         </div>
         {providerId === "openai" && (
           <div className="space-y-1.5">
@@ -339,9 +338,9 @@ function CloudStep({
         {tested && (
           <div className="space-y-1.5">
             <Label htmlFor="ob-model">Model</Label>
-            <select
+            <Select
               id="ob-model"
-              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              className="w-full"
               value={model}
               onChange={(e) => setModel(e.target.value)}
             >
@@ -350,7 +349,7 @@ function CloudStep({
                   {m.id}
                 </option>
               ))}
-            </select>
+            </Select>
             <Button
               className="mt-2"
               disabled={!model}

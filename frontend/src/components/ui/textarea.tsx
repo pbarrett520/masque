@@ -15,7 +15,9 @@ const Textarea = React.forwardRef<
     const el = inner.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
+    // scrollHeight is the content box; the element is border-box, so add
+    // the border back or the last line overflows by 2px and shows a bar.
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
   }, [value]);
 
   return (
@@ -23,7 +25,7 @@ const Textarea = React.forwardRef<
       rows={rows}
       value={value}
       className={cn(
-        "flex w-full resize-none overflow-y-auto rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+        "flex w-full resize-none overflow-y-auto rounded-md border border-input bg-card px-3 py-2 text-sm transition-colors placeholder:text-muted-foreground/80 focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50",
         className
       )}
       ref={(node) => {

@@ -3,14 +3,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { DBPath, Get, Set } from "../../wailsjs/go/settings/Service";
+import { Section } from "@/components/ui/section";
+import { Segmented } from "@/components/ui/segmented";
+import { DBPath, Get } from "../../wailsjs/go/settings/Service";
+import { setSetting } from "@/lib/settings";
 import { Persona, SetPersona } from "../../wailsjs/go/chat/Service";
 import {
   Delete as DeleteModel,
@@ -38,7 +34,7 @@ interface FieldSpec {
 }
 
 // SettingField loads, edits, and saves one string setting. An emptied
-// field deletes the key (Set(key, null)).
+// field deletes the key.
 function SettingField({
   spec,
   onStatus,
@@ -66,7 +62,7 @@ function SettingField({
   const save = async () => {
     try {
       const trimmed = value.trim();
-      await Set(spec.key, trimmed === "" ? null : trimmed);
+      await setSetting(spec.key, trimmed === "" ? null : trimmed);
       setValue(trimmed);
       setSaved(trimmed);
       onStatus("Saved. Applies to the next request.");
@@ -129,15 +125,16 @@ function PersonaCard({ onStatus }: { onStatus: (s: string) => void }) {
   const dirty = name !== saved.name || description !== saved.description;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Persona</CardTitle>
-        <CardDescription>
+    <Section
+      title="Persona"
+      description={
+        <>
           Who you are in chats: the name replaces {"{{user}}"}, the
           description is shown to the character.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
+        </>
+      }
+    >
+      <div className="space-y-3">
         <div className="space-y-1.5">
           <Label htmlFor="persona-name">Name</Label>
           <Input
@@ -162,8 +159,8 @@ function PersonaCard({ onStatus }: { onStatus: (s: string) => void }) {
         <Button onClick={save} disabled={!loaded || !name.trim() || !dirty}>
           Save
         </Button>
-      </CardContent>
-    </Card>
+      </div>
+    </Section>
   );
 }
 
@@ -209,49 +206,50 @@ function LocalModelsCard({ onStatus }: { onStatus: (s: string) => void }) {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Local models</CardTitle>
-        <CardDescription>
-          {status === null
-            ? "Checking Ollama…"
-            : status.reachable
-              ? `Ollama ${status.version} at ${status.baseUrl}`
-              : `Ollama isn't reachable at ${status.baseUrl} — is it running?`}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <Section
+      title="Local models"
+      description={
+        status === null
+          ? "Checking Ollama…"
+          : status.reachable
+            ? `Ollama ${status.version} is running at ${status.baseUrl}.`
+            : `Ollama isn't reachable at ${status.baseUrl}. Is it running?`
+      }
+    >
+      <div className="space-y-5">
         {status?.reachable && installed.length > 0 && (
-          <div className="space-y-1">
-            <p className="text-sm font-medium">Installed</p>
-            {installed.map((m) => (
-              <div
-                key={m.id}
-                className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-sm"
-              >
-                <span className="truncate">{m.id}</span>
-                <span className="flex-1" />
-                <span className="text-xs text-muted-foreground">
-                  {formatBytes(m.size)}
-                </span>
-                <button
-                  className="text-xs text-destructive hover:underline"
-                  onClick={() => void remove(m)}
+          <div>
+            <p className="mb-1 text-sm font-medium">Installed</p>
+            <ul className="divide-y divide-border">
+              {installed.map((m) => (
+                <li
+                  key={m.id}
+                  className="flex items-center gap-3 py-1.5 text-sm"
                 >
-                  delete
-                </button>
-              </div>
-            ))}
+                  <span className="truncate font-mono text-[0.8667rem]">{m.id}</span>
+                  <span className="flex-1" />
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {formatBytes(m.size)}
+                  </span>
+                  <button
+                    className="shrink-0 text-xs text-muted-foreground hover:text-destructive"
+                    onClick={() => void remove(m)}
+                  >
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
         {status?.reachable && (
-          <div className="space-y-1">
-            <p className="text-sm font-medium">Recommended for roleplay</p>
+          <div>
+            <p className="mb-1 text-sm font-medium">Recommended for roleplay</p>
             <StarterModelList onError={onStatus} />
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </Section>
   );
 }
 
@@ -266,18 +264,19 @@ export default function SettingsScreen({ theme, onThemeChange, dev, onDevChange 
   }, []);
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <PersonaCard onStatus={setStatus} />
+    <div className="mx-auto max-w-2xl">
+      <h2 className="font-title text-2xl leading-none">Settings</h2>
+      {/* Status sits under the title, where it is seen; the page scrolls. */}
+      <p className="mb-6 mt-2 min-h-5 text-sm text-muted-foreground" role="status">
+        {status}
+      </p>
+      <div className="space-y-6">
+        <PersonaCard onStatus={setStatus} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Ollama</CardTitle>
-          <CardDescription>
-            Local inference endpoint. Leave empty for the default
-            (http://localhost:11434).
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+        <Section
+          title="Ollama"
+          description="Local inference endpoint. Leave empty for the default, http://localhost:11434."
+        >
           <SettingField
             spec={{
               key: "provider.ollama.base_url",
@@ -286,47 +285,36 @@ export default function SettingsScreen({ theme, onThemeChange, dev, onDevChange 
             }}
             onStatus={setStatus}
           />
-        </CardContent>
-      </Card>
+        </Section>
 
-      <LocalModelsCard onStatus={setStatus} />
+        <LocalModelsCard onStatus={setStatus} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>OpenAI-compatible</CardTitle>
-          <CardDescription>
-            OpenRouter, LM Studio, vLLM, llama.cpp server, or OpenAI. The
-            base URL includes /v1 (e.g. https://openrouter.ai/api/v1).
-            Local servers usually need no key.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <SettingField
-            spec={{
-              key: "provider.openai.base_url",
-              label: "Base URL",
-              placeholder: "https://openrouter.ai/api/v1",
-            }}
-            onStatus={setStatus}
-          />
-          <SettingField
-            spec={{
-              key: "provider.openai.api_key",
-              label: "API key",
-              placeholder: "sk-or-…",
-              secret: true,
-            }}
-            onStatus={setStatus}
-          />
-        </CardContent>
-      </Card>
+        <Section
+          title="OpenAI-compatible"
+          description="OpenRouter, LM Studio, vLLM, llama.cpp server, or OpenAI. The base URL includes /v1, for example https://openrouter.ai/api/v1. Local servers usually need no key."
+        >
+          <div className="space-y-3">
+            <SettingField
+              spec={{
+                key: "provider.openai.base_url",
+                label: "Base URL",
+                placeholder: "https://openrouter.ai/api/v1",
+              }}
+              onStatus={setStatus}
+            />
+            <SettingField
+              spec={{
+                key: "provider.openai.api_key",
+                label: "API key",
+                placeholder: "sk-or-…",
+                secret: true,
+              }}
+              onStatus={setStatus}
+            />
+          </div>
+        </Section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Anthropic</CardTitle>
-          <CardDescription>Direct Claude API access.</CardDescription>
-        </CardHeader>
-        <CardContent>
+        <Section title="Anthropic" description="Direct Claude API access.">
           <SettingField
             spec={{
               key: "provider.anthropic.api_key",
@@ -336,59 +324,40 @@ export default function SettingsScreen({ theme, onThemeChange, dev, onDevChange 
             }}
             onStatus={setStatus}
           />
-        </CardContent>
-      </Card>
+        </Section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Developer mode</CardTitle>
-          <CardDescription>
-            Adds the context inspector, sampler panel, full model manager,
-            endpoint config, and request log. Instant, no restart.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex gap-2">
-          <Button
-            variant={!dev ? "default" : "outline"}
-            onClick={() => onDevChange(false)}
-          >
-            Off
-          </Button>
-          <Button
-            variant={dev ? "default" : "outline"}
-            onClick={() => onDevChange(true)}
-          >
-            On
-          </Button>
-        </CardContent>
-      </Card>
+        <Section
+          title="Developer mode"
+          description="Adds the context inspector, sampler panel, full model manager, endpoint config, and request log. Instant, no restart."
+        >
+          <Segmented
+            aria-label="Developer mode"
+            value={dev ? "on" : "off"}
+            options={[
+              { value: "off", label: "Off" },
+              { value: "on", label: "On" },
+            ]}
+            onChange={(v) => onDevChange(v === "on")}
+          />
+        </Section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Appearance</CardTitle>
-          <CardDescription>Applied and persisted immediately.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex gap-2">
-          <Button
-            variant={theme === "light" ? "default" : "outline"}
-            onClick={() => onThemeChange("light")}
-          >
-            Light
-          </Button>
-          <Button
-            variant={theme === "dark" ? "default" : "outline"}
-            onClick={() => onThemeChange("dark")}
-          >
-            Dark
-          </Button>
-        </CardContent>
-      </Card>
+        <Section title="Appearance" description="Applied and saved immediately.">
+          <Segmented
+            aria-label="Theme"
+            value={theme}
+            options={[
+              { value: "light", label: "Light" },
+              { value: "dark", label: "Dark" },
+            ]}
+            onChange={onThemeChange}
+          />
+        </Section>
 
-      <div className="space-y-1">
-        {status && <p className="text-sm text-muted-foreground">{status}</p>}
-        <p className="text-xs text-muted-foreground">
-          Database: <span className="font-mono">{dbPath || "…"}</span>
-        </p>
+        <div className="border-t border-border pt-6">
+          <p className="text-xs text-muted-foreground">
+            Database: <span className="font-mono">{dbPath || "…"}</span>
+          </p>
+        </div>
       </div>
     </div>
   );

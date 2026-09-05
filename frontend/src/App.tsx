@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Get, Set } from "../wailsjs/go/settings/Service";
+import { setSetting } from "@/lib/settings";
 import {
   DeleteChat,
   ListChats,
@@ -147,27 +148,35 @@ export default function App() {
   // the dev tab falls back to settings.
   const switchDev = (on: boolean) => {
     setDev(on);
-    Set(DEV_KEY, on ? true : null).catch(() => {});
+    setSetting(DEV_KEY, on ? true : null).catch(() => {});
     if (!on && view === "dev") setView("settings");
   };
 
+  // Nav items are plain text; the live one carries a gilt underline.
   const tab = (v: View, label: string, disabled = false) => (
-    <Button
-      variant={view === v ? "secondary" : "ghost"}
-      size="sm"
+    <button
+      className={
+        "relative px-1 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 rounded-sm disabled:opacity-40 " +
+        (view === v
+          ? "text-foreground after:absolute after:inset-x-1 after:-bottom-[9px] after:h-[2px] after:bg-gilt"
+          : "text-muted-foreground hover:text-foreground")
+      }
       disabled={disabled}
+      aria-current={view === v ? "page" : undefined}
       onClick={() => setView(v)}
     >
       {label}
-    </Button>
+    </button>
   );
 
+  const wordmark = (
+    <h1 className="font-title text-[1.2rem] leading-none">Masque</h1>
+  );
+
+  // First run has no chrome: the wizard's own wordmark is the hero.
   if (onboarding !== false) {
     return (
       <div className="flex h-screen flex-col bg-background text-foreground">
-        <header className="flex items-center gap-4 border-b border-border px-6 py-3">
-          <h1 className="text-lg font-semibold tracking-tight">Masque</h1>
-        </header>
         <main className="min-h-0 flex-1">
           {onboarding && <OnboardingScreen onDone={finishOnboarding} />}
         </main>
@@ -177,9 +186,9 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      <header className="flex items-center gap-4 border-b border-border px-6 py-3">
-        <h1 className="text-lg font-semibold tracking-tight">Masque</h1>
-        <nav className="flex gap-1">
+      <header className="flex h-12 shrink-0 items-center gap-6 border-b border-border px-6">
+        {wordmark}
+        <nav className="flex gap-4">
           {tab("characters", "Characters")}
           {tab("chat", "Chat", !chatState)}
           {tab("settings", "Settings")}
@@ -195,47 +204,54 @@ export default function App() {
             switches; ChatScreen is keyed by chatId so switching chats
             remounts it. */}
         {chatState && (
-          <div className={view === "chat" ? "mx-auto flex h-full w-full max-w-6xl gap-6" : "hidden"}>
-            <aside className="flex w-52 shrink-0 flex-col gap-2 overflow-y-auto">
-              <Button variant="outline" size="sm" onClick={newChat}>
+          <div className={view === "chat" ? "mx-auto flex h-full w-full max-w-6xl gap-8" : "hidden"}>
+            <aside className="flex w-52 shrink-0 flex-col overflow-y-auto">
+              <Button variant="outline" size="sm" className="mb-3" onClick={newChat}>
                 New chat
               </Button>
-              {chats.map((c) => (
-                <div
-                  key={c.id}
-                  className={
-                    "group cursor-pointer rounded-md border px-2 py-1.5 text-sm " +
-                    (c.id === chatState.chatId
-                      ? "border-primary bg-muted"
-                      : "border-border hover:bg-muted/50")
-                  }
-                  onClick={() => c.id !== chatState.chatId && openChat(c.id)}
-                >
-                  <div className="flex items-center gap-1">
-                    <span className="truncate font-medium">
-                      {c.characterName}
-                    </span>
-                    <span className="flex-1" />
-                    <span className="text-xs text-muted-foreground">
-                      {timeAgo(c.updatedAt)}
-                    </span>
-                    <button
-                      className="invisible text-xs text-destructive group-hover:visible"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void removeChat(c);
-                      }}
+              <ul className="flex flex-col gap-px">
+                {chats.map((c) => {
+                  const active = c.id === chatState.chatId;
+                  return (
+                    <li
+                      key={c.id}
+                      className={
+                        "group relative cursor-pointer rounded-md py-1.5 pl-3 pr-2 text-sm " +
+                        (active
+                          ? "bg-card text-foreground before:absolute before:inset-y-1.5 before:left-0 before:w-[2px] before:rounded-full before:bg-gilt"
+                          : "text-muted-foreground hover:bg-card/60 hover:text-foreground")
+                      }
+                      onClick={() => !active && openChat(c.id)}
                     >
-                      ✕
-                    </button>
-                  </div>
-                  {c.title && c.title !== c.characterName && (
-                    <div className="truncate text-xs text-muted-foreground">
-                      {c.title}
-                    </div>
-                  )}
-                </div>
-              ))}
+                      <div className="flex items-center gap-1">
+                        <span className="truncate font-medium">
+                          {c.characterName}
+                        </span>
+                        <span className="flex-1" />
+                        <span className="text-xs text-muted-foreground group-hover:hidden">
+                          {timeAgo(c.updatedAt)}
+                        </span>
+                        <button
+                          className="hidden rounded px-1 text-xs text-muted-foreground hover:text-destructive group-hover:block"
+                          title="Delete chat"
+                          aria-label="Delete chat"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void removeChat(c);
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {c.title && c.title !== c.characterName && (
+                        <div className="truncate text-xs text-muted-foreground">
+                          {c.title}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             </aside>
             <div className="min-w-0 flex-1">
               <ChatScreen

@@ -2,14 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Get, Set } from "../../wailsjs/go/settings/Service";
+import { Section } from "@/components/ui/section";
+import { Segmented } from "@/components/ui/segmented";
+import { Get } from "../../wailsjs/go/settings/Service";
+import { setSetting } from "@/lib/settings";
 import {
   All,
   CancelPull,
@@ -109,23 +105,23 @@ function ModelManagerCard({ onStatus }: { onStatus: (s: string) => void }) {
       : null;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Model manager</CardTitle>
-        <CardDescription>
-          {status === null
-            ? "Checking Ollama…"
-            : status.reachable
-              ? `Ollama ${status.version} at ${status.baseUrl}`
-              : `Ollama isn't reachable at ${status.baseUrl}`}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <Section
+      title="Model manager"
+      description={
+        status === null
+          ? "Checking Ollama…"
+          : status.reachable
+            ? `Ollama ${status.version} is running at ${status.baseUrl}.`
+            : `Ollama isn't reachable at ${status.baseUrl}.`
+      }
+    >
+      <div className="space-y-5">
         <div className="space-y-1.5">
           <Label htmlFor="dev-pull">Pull by name</Label>
           <div className="flex gap-2">
             <Input
               id="dev-pull"
+              className="font-mono text-[0.8667rem]"
               placeholder="llama3.1:8b or hf.co/{user}/{repo}:Q4_K_M"
               value={pullRef}
               disabled={pulling !== ""}
@@ -137,18 +133,18 @@ function ModelManagerCard({ onStatus }: { onStatus: (s: string) => void }) {
             </Button>
           </div>
           {pulling && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 pt-1">
               <span className="max-w-64 truncate font-mono text-xs">{pulling}</span>
-              <div className="h-2 flex-1 overflow-hidden rounded bg-muted">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-full bg-primary transition-all"
+                  className="h-full bg-gilt transition-[width]"
                   style={{ width: `${pct ?? 0}%` }}
                 />
               </div>
-              <span className="w-28 text-right text-xs text-muted-foreground">
+              <span className="w-28 text-right text-xs tabular-nums text-muted-foreground">
                 {pct !== null && progress
-                  ? `${formatBytes(progress.completed)} · ${pct}%`
-                  : (progress?.status ?? "starting…")}
+                  ? `${formatBytes(progress.completed)}, ${pct}%`
+                  : (progress?.status ?? "Starting…")}
               </span>
               <Button size="sm" variant="outline" onClick={() => CancelPull()}>
                 Cancel
@@ -158,58 +154,56 @@ function ModelManagerCard({ onStatus }: { onStatus: (s: string) => void }) {
         </div>
 
         {loaded.length > 0 && (
-          <div className="space-y-1">
-            <p className="text-sm font-medium">Loaded now</p>
-            {loaded.map((m) => (
-              <div
-                key={m.name}
-                className="flex items-center gap-2 rounded-md border border-border px-2 py-1 text-sm"
-              >
-                <span className="truncate font-mono text-xs">{m.name}</span>
-                <span className="flex-1" />
-                <span className="text-xs text-muted-foreground">
-                  {formatBytes(m.size)} ({formatBytes(m.sizeVram)} VRAM)
-                </span>
-              </div>
-            ))}
+          <div>
+            <p className="mb-1 text-sm font-medium">Loaded now</p>
+            <ul className="divide-y divide-border">
+              {loaded.map((m) => (
+                <li key={m.name} className="flex items-center gap-3 py-1.5 text-sm">
+                  <span className="truncate font-mono text-[0.8667rem]">{m.name}</span>
+                  <span className="flex-1" />
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {formatBytes(m.size)}, {formatBytes(m.sizeVram)} in VRAM
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
-        <div className="space-y-1">
-          <div className="flex items-center">
+        <div>
+          <div className="mb-1 flex items-center">
             <p className="text-sm font-medium">Installed ({models.length})</p>
             <span className="flex-1" />
-            <Button size="sm" variant="outline" onClick={() => void refresh()}>
+            <Button size="sm" variant="ghost" onClick={() => void refresh()}>
               Refresh
             </Button>
           </div>
-          {models.map((m) => (
-            <div
-              key={m.id}
-              className="flex items-center gap-2 rounded-md border border-border px-2 py-1 text-sm"
-            >
-              <span className="truncate font-mono text-xs">{m.id}</span>
-              {m.quant && (
-                <span className="rounded bg-muted px-1 text-xs text-muted-foreground">
-                  {m.quant}
-                </span>
-              )}
-              {m.family && (
-                <span className="text-xs text-muted-foreground">{m.family}</span>
-              )}
-              <span className="flex-1" />
-              <span className="text-xs text-muted-foreground">{formatBytes(m.size)}</span>
-              <button
-                className="text-xs text-destructive hover:underline"
-                onClick={() => void remove(m)}
-              >
-                delete
-              </button>
-            </div>
-          ))}
+          <ul className="divide-y divide-border">
+            {models.map((m) => (
+              <li key={m.id} className="flex items-center gap-3 py-1.5 text-sm">
+                <span className="truncate font-mono text-[0.8667rem]">{m.id}</span>
+                {m.quant && (
+                  <span className="rounded-sm bg-muted px-1 font-mono text-[0.7333rem] text-muted-foreground">
+                    {m.quant}
+                  </span>
+                )}
+                {m.family && (
+                  <span className="shrink-0 text-xs text-muted-foreground">{m.family}</span>
+                )}
+                <span className="flex-1" />
+                <span className="shrink-0 text-xs text-muted-foreground">{formatBytes(m.size)}</span>
+                <button
+                  className="shrink-0 text-xs text-muted-foreground hover:text-destructive"
+                  onClick={() => void remove(m)}
+                >
+                  Delete
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </Section>
   );
 }
 
@@ -249,7 +243,7 @@ function NumberSetting({
       return;
     }
     try {
-      await Set(settingKey, trimmed === "" ? null : n);
+      await setSetting(settingKey, trimmed === "" ? null : n);
       setSaved(trimmed);
       setValue(trimmed);
       onStatus("Saved. Applies to the next request.");
@@ -293,7 +287,7 @@ function EndpointConfigCard({ onStatus }: { onStatus: (s: string) => void }) {
   const setStream = async (on: boolean) => {
     try {
       // Unset means streaming on; only store an explicit false.
-      await Set("dev.streaming", on ? null : false);
+      await setSetting("dev.streaming", on ? null : false);
       setStreaming(on);
       onStatus(on ? "Streaming enabled." : "Streaming disabled — replies arrive whole.");
     } catch (err) {
@@ -302,14 +296,11 @@ function EndpointConfigCard({ onStatus }: { onStatus: (s: string) => void }) {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Endpoint config</CardTitle>
-        <CardDescription>
-          Applies to every provider. Endpoint URLs and keys live in Settings.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <Section
+      title="Endpoint config"
+      description="Applies to every provider. Endpoint URLs and keys live in Settings."
+    >
+      <div className="space-y-3">
         <NumberSetting
           settingKey="dev.request_timeout_secs"
           label="Request timeout (seconds, blank = none)"
@@ -318,21 +309,17 @@ function EndpointConfigCard({ onStatus }: { onStatus: (s: string) => void }) {
         />
         <div className="space-y-1.5">
           <Label>Streaming</Label>
-          <div className="flex gap-2">
-            <Button
-              variant={streaming ? "default" : "outline"}
+          <div>
+            <Segmented
+              aria-label="Streaming"
               size="sm"
-              onClick={() => void setStream(true)}
-            >
-              On
-            </Button>
-            <Button
-              variant={!streaming ? "default" : "outline"}
-              size="sm"
-              onClick={() => void setStream(false)}
-            >
-              Off
-            </Button>
+              value={streaming ? "on" : "off"}
+              options={[
+                { value: "on", label: "On" },
+                { value: "off", label: "Off" },
+              ]}
+              onChange={(v) => void setStream(v === "on")}
+            />
           </div>
         </div>
         <NumberSetting
@@ -347,8 +334,8 @@ function EndpointConfigCard({ onStatus }: { onStatus: (s: string) => void }) {
           placeholder="200000 (default)"
           onStatus={onStatus}
         />
-      </CardContent>
-    </Card>
+      </div>
+    </Section>
   );
 }
 
@@ -378,86 +365,98 @@ function LogViewCard({ onStatus }: { onStatus: (s: string) => void }) {
   const fmtTime = (unix: number) => new Date(unix * 1000).toLocaleTimeString();
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Request log</CardTitle>
-        <CardDescription>
-          Last {entries.length} provider request{entries.length === 1 ? "" : "s"} this
-          session (in memory only, keys never logged).
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-2">
+    <Section
+      title="Request log"
+      description={
+        (entries.length
+          ? `Last ${entries.length} provider request${entries.length === 1 ? "" : "s"} this session. `
+          : "Provider requests from this session appear here. ") +
+        "Kept in memory only; keys are never logged."
+      }
+    >
+      <div className="space-y-3">
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={refresh}>
             Refresh
           </Button>
-          <Button size="sm" variant="outline" onClick={() => void clear()}>
+          <Button size="sm" variant="ghost" onClick={() => void clear()}>
             Clear
           </Button>
         </div>
         {entries.length === 0 && (
           <p className="text-sm text-muted-foreground">No requests yet.</p>
         )}
-        {entries.map((e, i) => (
-          <div key={e.id} className="rounded-md border border-border">
-            <button
-              className="flex w-full items-center gap-2 px-2 py-1 text-left text-sm hover:bg-muted/50"
-              onClick={() => setOpen(open === i ? -1 : i)}
-            >
-              <span className="text-xs text-muted-foreground">{fmtTime(e.time)}</span>
-              <span className="font-mono text-xs">
-                {e.providerId} · {e.model}
-              </span>
-              <span
-                className={
-                  "rounded px-1 text-xs " +
-                  (e.status === "ok"
-                    ? "bg-primary/15 text-primary"
-                    : e.status === "canceled"
-                      ? "bg-muted text-muted-foreground"
-                      : "bg-destructive/15 text-destructive")
-                }
-              >
-                {e.status}
-              </span>
-              <span className="flex-1" />
-              {e.usage && (
-                <span className="text-xs text-muted-foreground">
-                  {e.usage.promptTokens}→{e.usage.completionTokens} tok
-                </span>
-              )}
-              <span className="text-xs text-muted-foreground">{e.durationMs} ms</span>
-            </button>
-            {open === i && (
-              <div className="space-y-2 border-t border-border p-2">
-                {e.error && <p className="text-xs text-destructive">{e.error}</p>}
-                <p className="font-mono text-xs text-muted-foreground">POST {e.url}</p>
-                <pre className="max-h-48 overflow-auto rounded bg-muted/30 p-2 text-xs">
-                  {JSON.stringify(e.request, null, 2)}
-                </pre>
-                {e.response && (
-                  <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted/30 p-2 text-xs">
-                    {e.response}
-                    {e.truncated ? "\n… (truncated)" : ""}
-                  </pre>
+        {entries.length > 0 && (
+          <ul className="divide-y divide-border rounded-md border border-border">
+            {entries.map((e, i) => (
+              <li key={e.id}>
+                <button
+                  className="flex w-full items-center gap-3 px-3 py-1.5 text-left text-sm hover:bg-accent/60"
+                  aria-expanded={open === i}
+                  onClick={() => setOpen(open === i ? -1 : i)}
+                >
+                  <span className="text-xs tabular-nums text-muted-foreground">{fmtTime(e.time)}</span>
+                  <span className="truncate font-mono text-[0.8rem]">
+                    {e.providerId} {e.model}
+                  </span>
+                  <span
+                    className={
+                      "text-xs " +
+                      (e.status === "ok"
+                        ? "text-gilt"
+                        : e.status === "canceled"
+                          ? "text-muted-foreground"
+                          : "text-destructive")
+                    }
+                  >
+                    {e.status}
+                  </span>
+                  <span className="flex-1" />
+                  {e.usage && (
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {e.usage.promptTokens} in, {e.usage.completionTokens} out
+                    </span>
+                  )}
+                  <span className="text-xs tabular-nums text-muted-foreground">{e.durationMs} ms</span>
+                </button>
+                {open === i && (
+                  <div className="space-y-2 border-t border-border bg-card/60 p-3">
+                    {e.error && <p className="text-xs text-destructive">{e.error}</p>}
+                    <p className="font-mono text-xs text-muted-foreground">POST {e.url}</p>
+                    <pre className="max-h-48 overflow-auto rounded-md bg-background p-2 font-mono text-xs">
+                      {JSON.stringify(e.request, null, 2)}
+                    </pre>
+                    {e.response && (
+                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-background p-2 font-mono text-xs">
+                        {e.response}
+                        {e.truncated ? "\n… (truncated)" : ""}
+                      </pre>
+                    )}
+                  </div>
                 )}
-              </div>
-            )}
-          </div>
-        ))}
-      </CardContent>
-    </Card>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Section>
   );
 }
 
 export default function DevScreen() {
   const [status, setStatus] = useState("");
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <ModelManagerCard onStatus={setStatus} />
-      <EndpointConfigCard onStatus={setStatus} />
-      <LogViewCard onStatus={setStatus} />
-      {status && <p className="text-sm text-muted-foreground">{status}</p>}
+    <div className="mx-auto max-w-2xl">
+      <h2 className="font-title text-2xl leading-none">Developer mode</h2>
+      {/* Status sits under the title, where it is seen; the page scrolls. */}
+      <p className="mb-6 mt-2 min-h-5 text-sm text-muted-foreground" role="status">
+        {status}
+      </p>
+      <div className="space-y-6">
+        <ModelManagerCard onStatus={setStatus} />
+        <EndpointConfigCard onStatus={setStatus} />
+        <LogViewCard onStatus={setStatus} />
+      </div>
     </div>
   );
 }

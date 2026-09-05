@@ -46,6 +46,13 @@ func (s *Service) Set(key string, value any) error {
 	return s.store.SetSetting(key, string(raw))
 }
 
+// Delete removes a setting. The frontend must use this rather than
+// Set(key, null): Wails v2 turns a JSON null argument into a zero
+// reflect.Value and the call fails before reaching Set.
+func (s *Service) Delete(key string) error {
+	return s.store.DeleteSetting(key)
+}
+
 // DBPath returns the path of the database file, shown on the settings
 // screen so users can find their data.
 func (s *Service) DBPath() string {

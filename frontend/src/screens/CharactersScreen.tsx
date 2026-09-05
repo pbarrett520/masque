@@ -135,7 +135,7 @@ export default function CharactersScreen({ onOpen }: Props) {
   return (
     <div
       className={
-        "mx-auto max-w-3xl space-y-4" + (dragging ? " opacity-70" : "")
+        "mx-auto max-w-3xl space-y-4" + (dragging ? " opacity-60" : "")
       }
       onDragOver={(e) => {
         e.preventDefault();
@@ -149,7 +149,7 @@ export default function CharactersScreen({ onOpen }: Props) {
       }}
     >
       <div className="flex items-center gap-2">
-        <h2 className="text-lg font-medium">Characters</h2>
+        <h2 className="font-title text-2xl leading-none">Characters</h2>
         <span className="flex-1" />
         <input
           ref={fileRef}
@@ -170,13 +170,13 @@ export default function CharactersScreen({ onOpen }: Props) {
         </Button>
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        Import a character card (PNG or JSON, V2/V3) — or drag files anywhere
-        on this screen.
+      <p className="text-sm text-muted-foreground">
+        Import a character card (PNG or JSON, V2 or V3), or drop files
+        anywhere on this screen.
       </p>
 
       {error && (
-        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
@@ -200,48 +200,59 @@ export default function CharactersScreen({ onOpen }: Props) {
         </Card>
       )}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+      {/* The playbill: portrait tiles, name beneath in the title face. */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-6 pt-2 sm:grid-cols-3 md:grid-cols-4">
         {characters.map((c) => (
           <div
             key={c.id}
-            className="group relative cursor-pointer overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-primary"
+            role="button"
+            tabIndex={0}
+            className="group relative cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
             onClick={() => onOpen(c.id)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onOpen(c.id);
+              }
+            }}
           >
-            {avatars[c.id] ? (
-              <img
-                src={avatars[c.id]}
-                alt=""
-                className="aspect-[2/3] w-full object-cover"
-              />
-            ) : (
-              <div className="flex aspect-[2/3] w-full items-center justify-center bg-muted text-4xl font-semibold text-muted-foreground">
-                {c.name.charAt(0).toUpperCase()}
-              </div>
-            )}
-            <div className="flex items-center gap-1 px-2 py-1.5">
-              <span className="truncate text-sm font-medium">{c.name}</span>
+            <div className="overflow-hidden rounded-md bg-card ring-1 ring-border transition-shadow group-hover:ring-gilt">
+              {avatars[c.id] ? (
+                <img
+                  src={avatars[c.id]}
+                  alt=""
+                  className="aspect-[2/3] w-full object-cover"
+                />
+              ) : (
+                <div className="flex aspect-[2/3] w-full items-center justify-center font-title text-5xl text-muted-foreground">
+                  {c.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+            </div>
+            <div className="flex items-baseline gap-1.5 px-0.5 pt-2">
+              <span className="truncate font-title text-base">{c.name}</span>
               {c.hasLorebook && (
                 <span
-                  className="rounded bg-muted px-1 text-[10px] uppercase text-muted-foreground"
+                  className="text-xs text-muted-foreground"
                   title="This card contains a lorebook; not yet supported."
                 >
-                  lore
+                  lorebook
                 </span>
               )}
             </div>
             <button
-              className="absolute right-1 top-1 hidden rounded bg-background/80 px-1.5 py-0.5 text-xs text-destructive group-hover:block"
+              className="absolute right-1.5 top-1.5 hidden rounded-sm bg-background/85 px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive group-hover:block"
               onClick={(e) => {
                 e.stopPropagation();
                 void remove(c);
               }}
             >
-              delete
+              Delete
             </button>
           </div>
         ))}
         {characters.length === 0 && (
-          <p className="col-span-full py-10 text-center text-sm text-muted-foreground">
+          <p className="col-span-full py-16 text-center text-sm text-muted-foreground">
             No characters yet. Import a card or create one.
           </p>
         )}
