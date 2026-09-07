@@ -68,7 +68,7 @@ func TestManifestParsesAndIsSane(t *testing.T) {
 		if sm.Ref == "" || sm.Name == "" || sm.Description == "" || sm.Params == "" {
 			t.Errorf("manifest entry missing fields: %+v", sm)
 		}
-		if sm.DownloadBytes <= 0 || sm.MinRAMBytes <= 0 {
+		if sm.DownloadBytes <= 0 || sm.MinRAMBytes < 0 {
 			t.Errorf("manifest entry %s has bad sizes: %+v", sm.Ref, sm)
 		}
 		if sm.Recommended {
@@ -130,7 +130,8 @@ func TestRecommendedAnnotatesInstalledAndFits(t *testing.T) {
 	defer srv.Close()
 
 	svc, _ := newTestService(t, srv.URL)
-	svc.totalRAM = func() uint64 { return 16 << 30 } // 16GB machine
+	svc.totalRAM = func() uint64 { return 16 << 30 }               // 16GB machine…
+	svc.gpuMemory = func() (uint64, bool) { return 8 << 30, true } // …with an 8GB GPU
 
 	models, err := svc.Recommended()
 	if err != nil {
@@ -146,28 +147,96 @@ func TestRecommendedAnnotatesInstalledAndFits(t *testing.T) {
 	if byName["Stheno v3.2"].Installed {
 		t.Errorf("Stheno should not be installed")
 	}
-	if !byName["Impish LLAMA"].Fits || !byName["Stheno v3.2"].Fits || !byName["Mag Mell R1"].Fits {
-		t.Errorf("small/mid models should fit 16GB: %+v", models)
+	if byName["Impish LLAMA"].Fit != FitGPU || byName["Stheno v3.2"].Fit != FitGPU {
+		t.Errorf("small models should fit an 8GB GPU: %+v", models)
 	}
-	if byName["Cydonia"].Fits {
-		t.Errorf("24B should not fit a 16GB machine")
+	if byName["Mag Mell R1"].Fit != FitSplit {
+		t.Errorf("12B should split across 8GB VRAM + 16GB RAM: %+v", byName["Mag Mell R1"])
+	}
+	if byName["Cydonia"].Fit != FitSplit || !byName["Cydonia"].Fits {
+		t.Errorf("24B on 8GB VRAM + 16GB RAM should be a soft split, got %+v", byName["Cydonia"])
+	}
+	for _, m := range models {
+		if m.VRAMBytes != 8<<30 || m.RAMBytes != 16<<30 || m.NeedBytes <= m.DownloadBytes {
+			t.Errorf("measurements not surfaced on %s: %+v", m.Name, m)
+		}
 	}
 }
 
-func TestRecommendedUnknownRAMFitsEverything(t *testing.T) {
+func TestRecommendedBigGPUFitsCydonia(t *testing.T) {
+	// The bug this guards: 31GB RAM + RTX 4090 used to flag the 24B as
+	// too big because only RAM was consulted.
 	srv := fakeOllama(t, nil, nil)
 	defer srv.Close()
 	svc, _ := newTestService(t, srv.URL)
-	svc.totalRAM = func() uint64 { return 0 }
+	svc.totalRAM = func() uint64 { return 31 << 30 }
+	svc.gpuMemory = func() (uint64, bool) { return 24 << 30, true }
 
 	models, err := svc.Recommended()
 	if err != nil {
 		t.Fatalf("Recommended: %v", err)
 	}
 	for _, m := range models {
-		if !m.Fits {
-			t.Errorf("unknown RAM must not exclude %s", m.Name)
+		if m.Fit != FitGPU || !m.Fits {
+			t.Errorf("%s should fit entirely on a 24GB GPU, got %q", m.Name, m.Fit)
 		}
+	}
+}
+
+func TestRecommendedRAMOnlyMachine(t *testing.T) {
+	srv := fakeOllama(t, nil, nil)
+	defer srv.Close()
+	svc, _ := newTestService(t, srv.URL)
+	svc.totalRAM = func() uint64 { return 8 << 30 }
+	svc.gpuMemory = func() (uint64, bool) { return 0, false }
+
+	models, err := svc.Recommended()
+	if err != nil {
+		t.Fatalf("Recommended: %v", err)
+	}
+	byName := map[string]StarterModel{}
+	for _, m := range models {
+		byName[m.Name] = m
+		if m.VRAMBytes != 0 {
+			t.Errorf("unknown VRAM must surface as 0: %+v", m)
+		}
+	}
+	if byName["Impish LLAMA"].Fit != FitSplit {
+		t.Errorf("4B on 8GB RAM-only should be split (CPU), got %q", byName["Impish LLAMA"].Fit)
+	}
+	if byName["Cydonia"].Fit != FitTight || byName["Cydonia"].Fits {
+		t.Errorf("24B on 8GB RAM-only should be tight, got %+v", byName["Cydonia"])
+	}
+}
+
+func TestRecommendedUnknownHardwareFitsEverything(t *testing.T) {
+	srv := fakeOllama(t, nil, nil)
+	defer srv.Close()
+	svc, _ := newTestService(t, srv.URL)
+	svc.totalRAM = func() uint64 { return 0 }
+	svc.gpuMemory = func() (uint64, bool) { return 0, false }
+
+	models, err := svc.Recommended()
+	if err != nil {
+		t.Fatalf("Recommended: %v", err)
+	}
+	for _, m := range models {
+		if !m.Fits || m.Fit != FitUnknown {
+			t.Errorf("unknown hardware must not exclude %s: %+v", m.Name, m)
+		}
+	}
+}
+
+func TestMachineReportsSeams(t *testing.T) {
+	svc, _ := newTestService(t, "")
+	svc.totalRAM = func() uint64 { return 31 << 30 }
+	svc.gpuMemory = func() (uint64, bool) { return 24 << 30, true }
+	if m := svc.Machine(); m.RAMBytes != 31<<30 || m.VRAMBytes != 24<<30 {
+		t.Errorf("Machine = %+v", m)
+	}
+	svc.gpuMemory = func() (uint64, bool) { return 12345, false }
+	if m := svc.Machine(); m.VRAMBytes != 0 {
+		t.Errorf("ok=false must report VRAM 0, got %+v", m)
 	}
 }
 

@@ -11,6 +11,7 @@ import {
   CancelPull,
   Delete as DeleteModel,
   Loaded,
+  Machine,
   Pull,
   PullInFlight,
   Status,
@@ -18,7 +19,7 @@ import {
 import { Clear, Entries } from "../../wailsjs/go/devlog/Service";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import { devlog, ollama, ollamamgr, provider } from "../../wailsjs/go/models";
-import { formatBytes } from "@/components/StarterModelList";
+import { describeMachine, formatBytes } from "@/components/StarterModelList";
 
 interface PullProgress {
   ref: string;
@@ -34,6 +35,7 @@ interface PullProgress {
 // included), delete, and loaded/VRAM status.
 function ModelManagerCard({ onStatus }: { onStatus: (s: string) => void }) {
   const [status, setStatus] = useState<ollamamgr.Status | null>(null);
+  const [machine, setMachine] = useState<ollamamgr.Machine | null>(null);
   const [models, setModels] = useState<provider.ModelInfo[]>([]);
   const [loaded, setLoaded] = useState<ollama.LoadedModel[]>([]);
   const [pullRef, setPullRef] = useState("");
@@ -44,6 +46,7 @@ function ModelManagerCard({ onStatus }: { onStatus: (s: string) => void }) {
     try {
       const s = await Status();
       setStatus(s);
+      setMachine(await Machine());
       if (s.reachable) {
         setModels((await All()) ?? []);
         setLoaded((await Loaded()) ?? []);
@@ -110,9 +113,14 @@ function ModelManagerCard({ onStatus }: { onStatus: (s: string) => void }) {
       description={
         status === null
           ? "Checking Ollama…"
-          : status.reachable
-            ? `Ollama ${status.version} is running at ${status.baseUrl}.`
-            : `Ollama isn't reachable at ${status.baseUrl}.`
+          : [
+              status.reachable
+                ? `Ollama ${status.version} is running at ${status.baseUrl}.`
+                : `Ollama isn't reachable at ${status.baseUrl}.`,
+              machine ? describeMachine(machine) : "",
+            ]
+              .filter(Boolean)
+              .join(" ")
       }
     >
       <div className="space-y-5">

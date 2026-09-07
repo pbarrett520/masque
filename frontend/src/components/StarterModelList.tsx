@@ -26,6 +26,73 @@ export function formatBytes(n: number): string {
   return `${n} B`;
 }
 
+// formatMemory renders RAM/VRAM the way spec sheets and nvidia-smi do:
+// whole binary gigabytes ("24 GB" for a 4090), as opposed to
+// formatBytes' decimal download sizes.
+export function formatMemory(n: number): string {
+  return `${Math.round(n / 2 ** 30)} GB`;
+}
+
+// Shape shared by ollamamgr.Machine and the measurements copied onto
+// every StarterModel.
+interface Measured {
+  ramBytes: number;
+  vramBytes: number;
+  unified?: boolean;
+}
+
+// describeMachine is the one-line "what we measured" shown above the
+// roster and next to the Ollama version on the Dev page, so users can
+// check the fit verdicts against their own hardware.
+export function describeMachine(m: Measured): string {
+  const unmeasured = "Couldn't measure this machine's memory, so nothing is being flagged.";
+  const ram = m.ramBytes > 0 ? formatMemory(m.ramBytes) : "";
+  const vram = m.vramBytes > 0 ? formatMemory(m.vramBytes) : "";
+  if (m.unified) {
+    return ram
+      ? `This machine has ${ram} of unified memory; about three quarters of it is available to the GPU.`
+      : unmeasured;
+  }
+  if (vram && ram) return `This machine has ${vram} of VRAM and ${ram} of RAM.`;
+  if (vram) return `This machine has ${vram} of VRAM; RAM couldn't be measured.`;
+  if (ram) {
+    return `This machine has ${ram} of RAM and no graphics card we could detect, so models run on the CPU.`;
+  }
+  return unmeasured;
+}
+
+// fitNote is the per-model annotation for the split and tight tiers;
+// gpu and unknown render nothing. Models are never hidden on fit.
+function fitNote(m: ollamamgr.StarterModel): { text: string; warn: boolean } | null {
+  const vram = m.vramBytes > 0 ? `${formatMemory(m.vramBytes)} VRAM` : "";
+  const ram = m.ramBytes > 0 ? `${formatMemory(m.ramBytes)} RAM` : "";
+  switch (m.fit) {
+    case "split":
+      return {
+        warn: false,
+        text: vram
+          ? "Will run partly on CPU; expect slower replies."
+          : "Will run on the CPU; expect slower replies.",
+      };
+    case "tight": {
+      const need = formatMemory(m.needBytes);
+      const have = vram
+        ? [vram, ram].filter(Boolean).join(" and ")
+        : ram
+          ? `${ram} and no graphics card we could detect`
+          : "";
+      return {
+        warn: true,
+        text: have
+          ? `Needs about ${need} of memory; this machine has ${have}.`
+          : `Needs about ${need} of memory; this machine may be too small.`,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
 interface Props {
   // Called when the user picks an installed model (onboarding). Absent
   // in settings, where the list is manage-only.
@@ -91,74 +158,79 @@ export default function StarterModelList({ onUse, onError }: Props) {
   }
 
   return (
-    <ul className="divide-y divide-border">
-      {models.map((m) => {
-        const isPulling = pulling === m.ref;
-        const pct =
-          isPulling && progress && progress.total > 0
-            ? Math.min(100, Math.round((progress.completed / progress.total) * 100))
-            : null;
-        return (
-          <li key={m.ref} className="py-3 first:pt-0">
-            <div className="flex items-baseline gap-2">
-              <span className="font-medium">{m.name}</span>
-              <span className="text-xs text-muted-foreground">{m.params}</span>
-              {m.recommended && (
-                <span className="text-xs font-medium text-gilt">Recommended</span>
+    <div>
+      {models.length > 0 && (
+        <p className="mb-2 text-xs text-muted-foreground">{describeMachine(models[0])}</p>
+      )}
+      <ul className="divide-y divide-border">
+        {models.map((m) => {
+          const isPulling = pulling === m.ref;
+          const note = fitNote(m);
+          const pct =
+            isPulling && progress && progress.total > 0
+              ? Math.min(100, Math.round((progress.completed / progress.total) * 100))
+              : null;
+          return (
+            <li key={m.ref} className="py-3 first:pt-0">
+              <div className="flex items-baseline gap-2">
+                <span className="font-medium">{m.name}</span>
+                <span className="text-xs text-muted-foreground">{m.params}</span>
+                {m.recommended && (
+                  <span className="text-xs font-medium text-gilt">Recommended</span>
+                )}
+                <span className="flex-1" />
+                <span className="text-xs text-muted-foreground">
+                  {formatBytes(m.downloadBytes)} download
+                </span>
+              </div>
+              <p className="mt-1 max-w-prose text-sm text-muted-foreground">{m.description}</p>
+              {note && (
+                <p className={`mt-1 text-xs ${note.warn ? "text-destructive" : "text-muted-foreground"}`}>
+                  {note.text}
+                </p>
               )}
-              <span className="flex-1" />
-              <span className="text-xs text-muted-foreground">
-                {formatBytes(m.downloadBytes)} download
-              </span>
-            </div>
-            <p className="mt-1 max-w-prose text-sm text-muted-foreground">{m.description}</p>
-            {!m.fits && (
-              <p className="mt-1 text-xs text-destructive">
-                Needs about {formatBytes(m.minRamBytes)} of memory. This machine
-                may be too small to run it well.
-              </p>
-            )}
-            <div className="mt-2 flex items-center gap-2">
-              {m.installed ? (
-                <>
-                  <span className="text-xs text-muted-foreground">Installed</span>
-                  {onUse && (
-                    <Button size="sm" onClick={() => onUse(m.ref)}>
-                      Use this model
+              <div className="mt-2 flex items-center gap-2">
+                {m.installed ? (
+                  <>
+                    <span className="text-xs text-muted-foreground">Installed</span>
+                    {onUse && (
+                      <Button size="sm" onClick={() => onUse(m.ref)}>
+                        Use this model
+                      </Button>
+                    )}
+                  </>
+                ) : isPulling ? (
+                  <div className="flex flex-1 items-center gap-2">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full bg-gilt transition-[width]"
+                        style={{ width: `${pct ?? 0}%` }}
+                      />
+                    </div>
+                    <span className="w-28 text-right text-xs tabular-nums text-muted-foreground">
+                      {pct !== null && progress
+                        ? `${formatBytes(progress.completed)}, ${pct}%`
+                        : (progress?.status ?? "Starting…")}
+                    </span>
+                    <Button size="sm" variant="outline" onClick={() => CancelPull()}>
+                      Cancel
                     </Button>
-                  )}
-                </>
-              ) : isPulling ? (
-                <div className="flex flex-1 items-center gap-2">
-                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full bg-gilt transition-[width]"
-                      style={{ width: `${pct ?? 0}%` }}
-                    />
                   </div>
-                  <span className="w-28 text-right text-xs tabular-nums text-muted-foreground">
-                    {pct !== null && progress
-                      ? `${formatBytes(progress.completed)}, ${pct}%`
-                      : (progress?.status ?? "Starting…")}
-                  </span>
-                  <Button size="sm" variant="outline" onClick={() => CancelPull()}>
-                    Cancel
+                ) : (
+                  <Button
+                    size="sm"
+                    variant={m.recommended ? "default" : "outline"}
+                    disabled={pulling !== ""}
+                    onClick={() => void startPull(m.ref)}
+                  >
+                    Download
                   </Button>
-                </div>
-              ) : (
-                <Button
-                  size="sm"
-                  variant={m.recommended ? "default" : "outline"}
-                  disabled={pulling !== ""}
-                  onClick={() => void startPull(m.ref)}
-                >
-                  Download
-                </Button>
-              )}
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -43,11 +44,22 @@ type StarterModel struct {
 	Params        string `json:"params"` // e.g. "12B"
 	Description   string `json:"description"`
 	DownloadBytes int64  `json:"downloadBytes"`
-	MinRAMBytes   int64  `json:"minRamBytes"`
-	Recommended   bool   `json:"recommended"`
-	Installed     bool   `json:"installed"`
-	// Fits is false when the machine's RAM is known to be below
-	// MinRAMBytes. Unknown RAM counts as fitting — flag, never hide.
+	// MinRAMBytes is an optional manifest override: a floor on the
+	// computed memory requirement for models that need more working
+	// room than the standard margin. 0 when the manifest omits it.
+	MinRAMBytes int64 `json:"minRamBytes"`
+	Recommended bool  `json:"recommended"`
+	Installed   bool  `json:"installed"`
+	// Fit is the tier from classifyFit: FitGPU, FitSplit, FitTight or
+	// FitUnknown. NeedBytes is the requirement it was judged against;
+	// VRAMBytes/RAMBytes are what was measured (0 = unknown), so the
+	// frontend can show the user the numbers behind the verdict.
+	Fit       Fit   `json:"fit"`
+	NeedBytes int64 `json:"needBytes"`
+	VRAMBytes int64 `json:"vramBytes"`
+	RAMBytes  int64 `json:"ramBytes"`
+	// Fits is kept for backward compatibility: true unless Fit is
+	// FitTight. Unknown hardware counts as fitting — flag, never hide.
 	Fits bool `json:"fits"`
 }
 
@@ -61,9 +73,11 @@ type EmitFunc func(event string, args ...any)
 
 // Service is bound to the Wails frontend as ollamamgr.Service.
 type Service struct {
-	store    *store.Store
-	emit     EmitFunc
-	totalRAM func() uint64 // test seam
+	store     *store.Store
+	emit      EmitFunc
+	totalRAM  func() uint64         // test seam
+	gpuMemory func() (uint64, bool) // test seam
+	unified   bool                  // Apple Silicon: GPU shares RAM
 
 	mu         sync.Mutex
 	pullCancel context.CancelFunc // non-nil while a pull is running
@@ -73,7 +87,13 @@ type Service struct {
 // NewService returns a Service backed by st that reports pull progress
 // through emit.
 func NewService(st *store.Store, emit EmitFunc) *Service {
-	return &Service{store: st, emit: emit, totalRAM: sysinfo.TotalRAM}
+	return &Service{
+		store:     st,
+		emit:      emit,
+		totalRAM:  sysinfo.TotalRAM,
+		gpuMemory: sysinfo.GPUMemory,
+		unified:   runtime.GOOS == "darwin" && runtime.GOARCH == "arm64",
+	}
 }
 
 // provider builds an Ollama provider from the current settings.
@@ -128,8 +148,27 @@ func (s *Service) All() ([]provider.ModelInfo, error) {
 	return s.provider().ListAllModels(ctx)
 }
 
+// Machine is what the fit check measured: the numbers behind every
+// StarterModel verdict, surfaced for the dev-mode model manager.
+type Machine struct {
+	RAMBytes  int64 `json:"ramBytes"`  // 0 = unknown
+	VRAMBytes int64 `json:"vramBytes"` // 0 = unknown or no discrete GPU
+	// Unified is true on Apple Silicon, where VRAM is always 0 and the
+	// GPU budget is a share of RAM instead.
+	Unified bool `json:"unified"`
+}
+
+// Machine measures RAM and discrete VRAM afresh.
+func (s *Service) Machine() Machine {
+	m := Machine{RAMBytes: int64(s.totalRAM()), Unified: s.unified}
+	if v, ok := s.gpuMemory(); ok {
+		m.VRAMBytes = int64(v)
+	}
+	return m
+}
+
 // Recommended returns the curated roster annotated with installed and
-// fits flags. Endpoint errors degrade gracefully: the roster still
+// fit tiers. Endpoint errors degrade gracefully: the roster still
 // renders, with nothing marked installed.
 func (s *Service) Recommended() ([]StarterModel, error) {
 	var m manifest
@@ -142,11 +181,15 @@ func (s *Service) Recommended() ([]StarterModel, error) {
 			installed[normalizeRef(mi.ID)] = true
 		}
 	}
-	ram := s.totalRAM()
+	machine := s.Machine()
 	out := make([]StarterModel, 0, len(m.Models))
 	for _, sm := range m.Models {
 		sm.Installed = installed[normalizeRef(sm.Ref)]
-		sm.Fits = ram == 0 || uint64(sm.MinRAMBytes) <= ram
+		sm.NeedBytes = int64(memoryNeed(sm.DownloadBytes, sm.MinRAMBytes))
+		sm.VRAMBytes = machine.VRAMBytes
+		sm.RAMBytes = machine.RAMBytes
+		sm.Fit = classifyFit(uint64(sm.NeedBytes), uint64(machine.VRAMBytes), uint64(machine.RAMBytes), machine.Unified)
+		sm.Fits = sm.Fit != FitTight
 		out = append(out, sm)
 	}
 	return out, nil

@@ -1,6 +1,10 @@
 package sysinfo
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -32,4 +36,21 @@ func totalRAM() uint64 {
 		return 0
 	}
 	return m.TotalPhys
+}
+
+// gpuMemory covers NVIDIA only for now: nvidia-smi is normally on PATH
+// (recent drivers install it under System32) and otherwise lives in the
+// legacy NVSMI folder. AMD reports unknown until a no-cgo route exists.
+func gpuMemory() (uint64, bool) {
+	candidates := []string{"nvidia-smi"}
+	if pf := os.Getenv("ProgramFiles"); pf != "" {
+		candidates = append(candidates, filepath.Join(pf, "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe"))
+	}
+	return nvidiaVRAM(candidates)
+}
+
+// hideConsole stops the child from opening a console window over the
+// GUI app.
+func hideConsole(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 }
