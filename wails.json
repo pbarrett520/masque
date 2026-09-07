@@ -9,5 +9,12 @@
   "author": {
     "name": "Patrick Barrett",
     "email": "pbarrett520@yahoo.com"
+  },
+  "info": {
+    "companyName": "Masque",
+    "productName": "Masque",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright © 2026 Patrick Barrett",
+    "comments": "Local-first AI roleplay frontend"
   }
 }

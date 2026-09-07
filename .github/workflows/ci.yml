@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Test, lint, build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      - name: Go tests
+        run: go test -tags webkit2_41 ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.13
+          args: --build-tags=webkit2_41
+
+      # Also type-checks the frontend (npm run build = tsc && vite build).
+      - name: Wails build
+        run: wails build -tags webkit2_41 -trimpath -m -nosyncgomod

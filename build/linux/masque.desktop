@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Masque
+GenericName=AI Roleplay
+Comment=Local-first AI roleplay frontend
+Exec=masque
+Icon=masque
+Terminal=false
+Categories=Utility;Chat;
+Keywords=roleplay;chat;ollama;llm;
+StartupWMClass=masque

@@ -15,15 +15,13 @@ Built with [Wails v2](https://wails.io) (Go backend, native webview) and a
 React/TypeScript/Tailwind/shadcn-ui frontend, backed by an embedded SQLite
 database (`modernc.org/sqlite`, pure Go — no CGo from our own code).
 
-**Status:** M1.5 — chat polish: regenerate-as-swipes with left/right
-navigation (alternate greetings included), in-place message editing, a
-default persona (name + description) that flows into prompts, and a
-chat list with multiple chats per character, resume, and delete. On top
-of card import (PNG/JSON, V1/V2/V3) with a characters screen, and three
-providers (Ollama native, OpenAI-compatible, Anthropic) with mid-chat
-switching. Ollama management/onboarding and dev mode land in later M1
-milestones; see `docs/masque-dev-spec-m1.md` for the full build order
-(not checked into this repo).
+**Status:** M1.8 — packaging. All M1 features are in (chat with swipes,
+edit, regenerate and personas; PNG/JSON card import; Ollama, OpenAI-compatible
+and Anthropic providers; Ollama model manager with first-run onboarding; dev
+mode with a context inspector, sampler panel and request log). The
+remaining M1 work is producing and clean-machine-testing unsigned installers
+for Linux, Windows and macOS; see `docs/masque-dev-spec-m1.md` for the full
+build order (not checked into this repo).
 
 ## Prerequisites
 
@@ -57,10 +55,50 @@ make build
 
 Produces a production binary at `build/bin/masque`.
 
+### Packaging
+
+Installers are unsigned for now (code signing is deferred until public
+release). Linux packages can be built locally; Windows and macOS need their
+own OS, so CI builds those.
+
+```sh
+make appimage   # build/bin/Masque-<version>-x86_64.AppImage (bundles GTK + WebKitGTK)
+make deb        # build/bin/masque_<version>_amd64.deb (depends on libwebkit2gtk-4.1-0)
+```
+
+`build/linux/appimage.sh` downloads linuxdeploy and Tauri's fork of
+linuxdeploy-plugin-gtk into `build/linux/.tools/` (gitignored) on first use.
+Build the AppImage on the oldest glibc you want to support; it copies
+WebKit's helper processes into the bundle and pins the working directory to
+`usr/` so the library's rewritten paths resolve. The .deb is a plain
+`dpkg-deb` layout, no bundling.
+
+`build/darwin/dmg.sh` wraps `build/bin/masque.app` (from
+`wails build -platform darwin/universal`) in a drag-to-Applications dmg and
+ad-hoc signs it. Windows uses Wails' NSIS support
+(`wails build -platform windows/amd64 -nsis`; needs `makensis` on PATH).
+
+### CI
+
+- `.github/workflows/ci.yml` runs Go tests, golangci-lint and a full
+  `wails build` (which type-checks the frontend) on every push to `main` and
+  every pull request.
+- `.github/workflows/release.yml` builds all three platforms, smoke-launches
+  each result on a clean runner (the AppImage on an Ubuntu 24.04 box with
+  WebKitGTK removed, the .deb via `apt install`, the NSIS installer with `/S`,
+  the dmg mounted and its app launched), and on a `vX.Y.Z` tag opens a
+  **draft** GitHub release with the artifacts and a `SHA256SUMS.txt`. Trigger
+  it by hand from the Actions tab for a dry run; the version is taken from
+  the tag (`0.0.0` for manual runs) and stamped into `wails.json`.
+
+To cut a release: bump `info.productVersion` in `wails.json`, commit, then
+`git tag vX.Y.Z && git push origin vX.Y.Z`, and publish the draft once the
+smoke jobs are green.
+
 ## Testing and linting
 
 ```sh
-make test   # go test ./...
+make test   # go test ./... (with -tags webkit2_41 where needed)
 make lint   # golangci-lint run (config: .golangci.yml)
 ```
 
