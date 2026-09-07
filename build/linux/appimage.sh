@@ -17,6 +17,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="${1:-$ROOT/build/bin}"
+mkdir -p "$OUT"; OUT="$(cd "$OUT" && pwd)"  # absolute: scripts cd around
 VERSION="${VERSION:-$(jq -r '.info.productVersion' "$ROOT/wails.json")}"
 ARCH="$(uname -m)"
 BIN="$ROOT/build/bin/masque"
@@ -54,8 +55,9 @@ LINUXDEPLOY="$TOOLS/linuxdeploy/AppRun"
 # compiled-in absolute path. Copy them (and the injected bundle) into the
 # AppDir at the same relative path; the gtk plugin rewrites "/usr" to "././"
 # inside libwebkit, so with cwd=$APPDIR/usr they resolve inside the bundle.
-WEBKIT_LIBEXEC="$(dirname "$(find /usr/lib /usr/lib64 /usr/libexec -path '*webkit2gtk-4.1*' -name WebKitWebProcess -print -quit 2>/dev/null)")"
-[ -d "$WEBKIT_LIBEXEC" ] && [ "$WEBKIT_LIBEXEC" != "." ] || { echo "cannot find webkit2gtk-4.1 helper processes (WebKitWebProcess)" >&2; exit 1; }
+WEBKIT_WEBPROCESS="$(find /usr/lib /usr/lib64 /usr/libexec -path '*webkit2gtk-4.1*' -name WebKitWebProcess -print -quit 2>/dev/null || true)"
+WEBKIT_LIBEXEC="$(dirname "${WEBKIT_WEBPROCESS:-/nonexistent/x}")"
+[ -d "$WEBKIT_LIBEXEC" ] || { echo "cannot find webkit2gtk-4.1 helper processes (WebKitWebProcess)" >&2; exit 1; }
 for helper in WebKitNetworkProcess WebKitWebProcess WebKitGPUProcess; do
   [ -x "$WEBKIT_LIBEXEC/$helper" ] || continue
   install -D "$WEBKIT_LIBEXEC/$helper" "$APPDIR$WEBKIT_LIBEXEC/$helper"

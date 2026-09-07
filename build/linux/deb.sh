@@ -8,6 +8,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="${1:-$ROOT/build/bin}"
+mkdir -p "$OUT"; OUT="$(cd "$OUT" && pwd)"  # absolute: scripts cd around
 VERSION="${VERSION:-$(jq -r '.info.productVersion' "$ROOT/wails.json")}"
 BIN="$ROOT/build/bin/masque"
 [ -x "$BIN" ] || { echo "missing $BIN — run 'make build' first" >&2; exit 1; }

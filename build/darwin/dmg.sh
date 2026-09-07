@@ -9,6 +9,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="${1:-$ROOT/build/bin}"
+mkdir -p "$OUT"; OUT="$(cd "$OUT" && pwd)"  # absolute: scripts cd around
 VERSION="${VERSION:-$(/usr/bin/plutil -extract info.productVersion raw -o - "$ROOT/wails.json" 2>/dev/null || jq -r '.info.productVersion' "$ROOT/wails.json")}"
 SRC="$ROOT/build/bin/masque.app"
 [ -d "$SRC" ] || { echo "missing $SRC — run 'wails build -platform darwin/universal' first" >&2; exit 1; }

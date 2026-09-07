@@ -46,7 +46,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           version: ${{ env.VERSION }}
@@ -60,7 +60,7 @@ jobs:
         run: build/linux/appimage.sh dist
       - name: Build deb
         run: build/linux/deb.sh dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: dist/*
@@ -71,10 +71,10 @@ jobs:
     needs: linux
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: build/smoke.sh
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: linux
           path: dist
@@ -93,10 +93,10 @@ jobs:
     needs: linux
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: build/smoke.sh
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: linux
           path: dist
@@ -117,7 +117,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           version: ${{ env.VERSION }}
@@ -147,7 +147,7 @@ jobs:
           if ($app.HasExited) { throw "masque.exe exited early with code $($app.ExitCode)" }
           Write-Host "smoke: masque.exe still running after 20s - OK"
           Stop-Process -Id $app.Id -Force
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: dist/*
@@ -160,7 +160,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           version: ${{ env.VERSION }}
@@ -178,7 +178,7 @@ jobs:
           codesign --verify --deep --strict "$RUNNER_TEMP/Masque.app"
           lipo -info "$RUNNER_TEMP/Masque.app/Contents/MacOS/masque"
           build/smoke.sh -t 20 "$RUNNER_TEMP/Masque.app/Contents/MacOS/masque"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: dist/*
@@ -190,7 +190,7 @@ jobs:
     needs: [version, smoke-appimage, smoke-deb, windows, macos]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
