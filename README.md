@@ -70,8 +70,10 @@ make deb        # build/bin/masque_<version>_amd64.deb (depends on libwebkit2gtk
 linuxdeploy-plugin-gtk into `build/linux/.tools/` (gitignored) on first use.
 Build the AppImage on the oldest glibc you want to support; it copies
 WebKit's helper processes into the bundle and pins the working directory to
-`usr/` so the library's rewritten paths resolve. The .deb is a plain
-`dpkg-deb` layout, no bundling.
+`usr/` so the library's rewritten paths resolve. By AppImage convention it
+still expects what any graphical desktop has (fontconfig, harfbuzz, Mesa
+GL/EGL/GLES, fonts) but no WebKitGTK. The .deb is a plain `dpkg-deb`
+layout, no bundling.
 
 `build/darwin/dmg.sh` wraps `build/bin/masque.app` (from
 `wails build -platform darwin/universal`) in a drag-to-Applications dmg and

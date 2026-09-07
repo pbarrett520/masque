@@ -3,7 +3,11 @@
 #
 # WebKitGTK is bundled along with GTK (via linuxdeploy-plugin-gtk), so the
 # result runs on distros that ship neither webkit2gtk-4.0 nor -4.1. Build on
-# the oldest glibc you intend to support (CI uses ubuntu-22.04).
+# the oldest glibc you intend to support (CI uses ubuntu-22.04). Per the
+# AppImage exclude list, base desktop libs stay on the host: glibc, fontconfig,
+# harfbuzz/fribidi, wayland-client, Mesa libGL/libEGL/libGLESv2/libgbm, fonts.
+# (WebKit dlopens libGLESv2 at startup.) A container without them fails; see
+# the smoke-appimage job in .github/workflows/release.yml for the baseline.
 #
 # Needs: pkg-config, file, the GTK3/librsvg dev packages (the gtk plugin
 # reads their .pc files), the gtk/gdk-pixbuf query tools, and the

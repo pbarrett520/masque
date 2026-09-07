@@ -78,10 +78,16 @@ jobs:
         with:
           name: linux
           path: dist
-      - name: Remove any system WebKitGTK so only the bundled one can be used
+      - name: Remove system WebKitGTK; keep only a bare desktop baseline
+        # linuxdeploy bundles GTK + WebKit but, by AppImage convention, leaves
+        # what every graphical desktop already has to the host: fontconfig,
+        # harfbuzz/fribidi, wayland-client, Mesa GL/EGL/GLES, fonts. Install
+        # exactly that so the test reflects "desktop machine without WebKitGTK".
         run: |
           sudo apt-get remove -y 'libwebkit2gtk-4.1-0' 'libwebkit2gtk-4.0-37' 'libjavascriptcoregtk-4*' 2>/dev/null || true
-          sudo apt-get install -y --no-install-recommends xvfb
+          sudo apt-get install -y --no-install-recommends xvfb \
+            libfontconfig1 libharfbuzz0b libfribidi0 libwayland-client0 \
+            libegl1 libgl1 libgles2 libgbm1 fonts-dejavu-core
           ! ldconfig -p | grep -q libwebkit2gtk
       - name: Launch under Xvfb
         run: |

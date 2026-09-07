@@ -29,5 +29,12 @@ if kill -0 "$PID" 2>/dev/null; then
 fi
 wait "$PID"; CODE=$?
 echo "smoke: '$*' exited early with code $CODE — FAIL"
-echo "--- output ---"; cat "$LOG"; rm -f "$LOG"
+echo "--- output ---"; cat "$LOG"
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+  # Surface the tail of the output as check-run annotations (readable via
+  # the public API without a token, unlike the raw job log).
+  echo "::error::smoke: '$*' exited with code $CODE"
+  tail -n 8 "$LOG" | while IFS= read -r line; do echo "::error::${line:0:900}"; done
+fi
+rm -f "$LOG"
 exit 1
