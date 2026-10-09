@@ -17,17 +17,19 @@ import (
 // holds the complete original JSON — everything Masque doesn't use
 // (lorebook, extensions, creator notes) is preserved there untouched.
 type Card struct {
-	Spec               string   `json:"spec"` // chara_card_v2, chara_card_v3, or "" for V1
-	Name               string   `json:"name"`
-	Nickname           string   `json:"nickname"` // V3; replaces {{char}} when set
-	Description        string   `json:"description"`
-	Personality        string   `json:"personality"`
-	Scenario           string   `json:"scenario"`
-	FirstMes           string   `json:"firstMes"`
-	MesExample         string   `json:"mesExample"`
-	SystemPrompt       string   `json:"systemPrompt"`
-	AlternateGreetings []string `json:"alternateGreetings"`
-	HasLorebook        bool     `json:"hasLorebook"` // preserved but not injected in M1
+	Spec         string `json:"spec"` // chara_card_v2, chara_card_v3, or "" for V1
+	Name         string `json:"name"`
+	Nickname     string `json:"nickname"` // V3; replaces {{char}} when set
+	Description  string `json:"description"`
+	Personality  string `json:"personality"`
+	Scenario     string `json:"scenario"`
+	FirstMes     string `json:"firstMes"`
+	MesExample   string `json:"mesExample"`
+	SystemPrompt string `json:"systemPrompt"`
+	// PostHistoryInstructions is the V2/V3 note sent after the history.
+	PostHistoryInstructions string   `json:"postHistoryInstructions"`
+	AlternateGreetings      []string `json:"alternateGreetings"`
+	HasLorebook             bool     `json:"hasLorebook"` // preserved but not injected in M1
 
 	Raw json.RawMessage `json:"-"`
 }
@@ -43,16 +45,17 @@ func (c Card) DisplayName() string {
 
 // fields is the union of V1/V2/V3 data fields Masque reads.
 type fields struct {
-	Name               string          `json:"name"`
-	Nickname           string          `json:"nickname"`
-	Description        string          `json:"description"`
-	Personality        string          `json:"personality"`
-	Scenario           string          `json:"scenario"`
-	FirstMes           string          `json:"first_mes"`
-	MesExample         string          `json:"mes_example"`
-	SystemPrompt       string          `json:"system_prompt"`
-	AlternateGreetings []string        `json:"alternate_greetings"`
-	CharacterBook      json.RawMessage `json:"character_book"`
+	Name                    string          `json:"name"`
+	Nickname                string          `json:"nickname"`
+	Description             string          `json:"description"`
+	Personality             string          `json:"personality"`
+	Scenario                string          `json:"scenario"`
+	FirstMes                string          `json:"first_mes"`
+	MesExample              string          `json:"mes_example"`
+	SystemPrompt            string          `json:"system_prompt"`
+	PostHistoryInstructions string          `json:"post_history_instructions"`
+	AlternateGreetings      []string        `json:"alternate_greetings"`
+	CharacterBook           json.RawMessage `json:"character_book"`
 }
 
 // envelope is the V2/V3 wrapper around the data object.
@@ -89,18 +92,19 @@ func ParseJSON(raw []byte) (Card, error) {
 		return Card{}, fmt.Errorf("card has no character name; not a character card?")
 	}
 	return Card{
-		Spec:               env.Spec,
-		Name:               f.Name,
-		Nickname:           f.Nickname,
-		Description:        f.Description,
-		Personality:        f.Personality,
-		Scenario:           f.Scenario,
-		FirstMes:           f.FirstMes,
-		MesExample:         f.MesExample,
-		SystemPrompt:       f.SystemPrompt,
-		AlternateGreetings: f.AlternateGreetings,
-		HasLorebook:        len(f.CharacterBook) > 0 && string(f.CharacterBook) != "null",
-		Raw:                json.RawMessage(raw),
+		Spec:                    env.Spec,
+		Name:                    f.Name,
+		Nickname:                f.Nickname,
+		Description:             f.Description,
+		Personality:             f.Personality,
+		Scenario:                f.Scenario,
+		FirstMes:                f.FirstMes,
+		MesExample:              f.MesExample,
+		SystemPrompt:            f.SystemPrompt,
+		PostHistoryInstructions: f.PostHistoryInstructions,
+		AlternateGreetings:      f.AlternateGreetings,
+		HasLorebook:             len(f.CharacterBook) > 0 && string(f.CharacterBook) != "null",
+		Raw:                     json.RawMessage(raw),
 	}, nil
 }
 

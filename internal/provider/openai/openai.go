@@ -214,6 +214,9 @@ func buildChatBody(req provider.ChatRequest) (chatBody, provider.ParamReport) {
 		messages = append(messages, provider.Message{Role: provider.RoleSystem, Content: req.System})
 	}
 	messages = append(messages, req.Messages...)
+	if req.PostHistory != "" {
+		messages = append(messages, provider.Message{Role: provider.RoleSystem, Content: req.PostHistory})
+	}
 
 	body := chatBody{
 		Model:    req.Model,

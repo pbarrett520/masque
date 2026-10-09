@@ -80,7 +80,11 @@ type ChatRequest struct {
 	Model    string
 	Messages []Message // history; System is carried separately
 	System   string
-	Params   SamplerParams
+	// PostHistory is a short instruction sent after the history (a
+	// trailing system message where the API allows one, appended to
+	// System otherwise). "" means none.
+	PostHistory string
+	Params      SamplerParams
 	// NoStream asks for a non-streamed completion (dev-mode endpoint
 	// config, §9): the provider sends stream:false and the ChatStream
 	// channel delivers the whole reply as one delta followed by Done.

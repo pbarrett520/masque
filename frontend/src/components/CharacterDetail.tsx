@@ -140,7 +140,7 @@ export default function CharacterDetail({
       </button>
 
       <div className="flex gap-6">
-        <div className="w-48 shrink-0 overflow-hidden rounded-md bg-card ring-1 ring-border">
+        <div className="w-48 shrink-0 self-start overflow-hidden rounded-md bg-card ring-1 ring-border">
           {avatar ? (
             <img src={avatar} alt="" className="aspect-[2/3] w-full object-cover" />
           ) : (

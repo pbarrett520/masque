@@ -170,10 +170,16 @@ func normalizeMessages(in []provider.Message) []provider.Message {
 // (they'd be rejected with a 400). Everything dropped is recorded
 // (inspector contract, §4).
 func buildChatBody(req provider.ChatRequest) (chatBody, provider.ParamReport) {
+	system := req.System
+	if req.PostHistory != "" {
+		// The Messages API has no system role mid-conversation; the
+		// note goes at the end of the system block instead.
+		system = strings.TrimSpace(system + "\n\n" + req.PostHistory)
+	}
 	body := chatBody{
 		Model:     req.Model,
 		MaxTokens: defaultMaxTokens,
-		System:    req.System,
+		System:    system,
 		Messages:  normalizeMessages(req.Messages),
 		Stream:    !req.NoStream,
 	}

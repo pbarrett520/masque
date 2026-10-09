@@ -18,6 +18,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"masque/internal/card"
+	"masque/internal/starters"
 	"masque/internal/store"
 )
 
@@ -507,6 +508,19 @@ func (s *Service) ChatCount(id int64) (int, error) {
 // The frontend confirms first, stating the chat count.
 func (s *Service) Delete(id int64) error {
 	return s.store.SoftDeleteCharacter(id)
+}
+
+// RestoreStarters re-adds any bundled starter character the user has
+// deleted, leaving edited ones alone. Returns the names added.
+func (s *Service) RestoreStarters() ([]string, error) {
+	names, err := starters.Restore(s.store)
+	if err != nil {
+		return nil, err
+	}
+	if names == nil {
+		names = []string{}
+	}
+	return names, nil
 }
 
 // Avatar returns the character's avatar as a data URI, or "" when it

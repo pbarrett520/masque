@@ -406,3 +406,20 @@ func TestHealthCheck(t *testing.T) {
 		t.Errorf("HealthCheck without key = %v", err)
 	}
 }
+
+func TestPostHistoryAppendedToSystem(t *testing.T) {
+	body, _ := buildChatBody(provider.ChatRequest{
+		Model:       "claude-x",
+		System:      "sys",
+		Messages:    []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+		PostHistory: "remember the rules",
+	})
+	if body.System != "sys\n\nremember the rules" {
+		t.Errorf("system = %q", body.System)
+	}
+	for _, m := range body.Messages {
+		if m.Role == provider.RoleSystem {
+			t.Error("anthropic must not carry a system-role message")
+		}
+	}
+}

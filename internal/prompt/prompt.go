@@ -35,6 +35,14 @@ type Character struct {
 	Scenario     string
 	SystemPrompt string // overrides defaultTemplate when set
 	FirstMes     string // greeting; used by ChatService, not by Build
+	// MesExample is the card's example dialogue (<START>-separated),
+	// appended to the system prompt: examples teach voice and length
+	// better than rules do.
+	MesExample string
+	// PostHistory is the card's post_history_instructions: a short
+	// reminder providers place after the chat history, where it has the
+	// most influence on the next reply.
+	PostHistory string
 }
 
 // Persona is the user's identity in the chat.
@@ -67,6 +75,9 @@ type Result struct {
 	System   string             // assembled system prompt
 	Messages []provider.Message // history that fit the budget, oldest first
 	Segments []Segment          // system parts, then included history
+	// PostHistory is the substituted post-history note, "" when the
+	// card has none. Providers send it after Messages.
+	PostHistory string
 
 	ContextWindow   int // budget inputs, after defaulting
 	ReservedOutput  int
@@ -154,6 +165,12 @@ func Build(in Input) Result {
 			text:   in.Persona.Name + " is: " + sub(p),
 		})
 	}
+	if ex := strings.TrimSpace(in.Character.MesExample); ex != "" {
+		parts = append(parts, part{
+			source: "card.mes_example",
+			text:   "Example dialogue, showing " + in.Character.Name + "'s voice:\n" + sub(ex),
+		})
+	}
 
 	texts := make([]string, 0, len(parts))
 	for _, p := range parts {
@@ -188,6 +205,17 @@ func Build(in Input) Result {
 			Source:  "message[" + m.Role + "]",
 			Content: m.Content,
 			Tokens:  EstimateTokens(m.Content),
+		})
+	}
+	// The post-history note goes after the history on the wire, so it
+	// is the last segment; it is budgeted like system text.
+	if ph := strings.TrimSpace(in.Character.PostHistory); ph != "" {
+		res.PostHistory = sub(ph)
+		res.Segments = append(res.Segments, Segment{
+			Name:    "post_history",
+			Source:  "card.post_history_instructions",
+			Content: res.PostHistory,
+			Tokens:  EstimateTokens(res.PostHistory),
 		})
 	}
 	return res

@@ -22,6 +22,7 @@ import CloudProviderForm, {
   urlSetting,
 } from "@/components/CloudProviderForm";
 import { Providers } from "../../wailsjs/go/chat/Service";
+import { RestoreStarters } from "../../wailsjs/go/character/Service";
 import { Select } from "@/components/ui/select";
 import { chat } from "../../wailsjs/go/models";
 
@@ -438,6 +439,28 @@ export default function SettingsScreen({ theme, onThemeChange, dev, onDevChange 
         <LocalModelsCard onStatus={setStatus} />
 
         <CloudProvidersCard onStatus={setStatus} />
+
+        <Section
+          title="Starter characters"
+          description="Masque ships with three characters. Deleted ones can be brought back; edited ones are left as they are."
+        >
+          <Button
+            variant="outline"
+            onClick={() =>
+              RestoreStarters()
+                .then((names) =>
+                  setStatus(
+                    names.length
+                      ? `Restored ${names.join(", ")}.`
+                      : "All starter characters are already here."
+                  )
+                )
+                .catch((err) => setStatus(String(err)))
+            }
+          >
+            Restore starter characters
+          </Button>
+        </Section>
 
         <Section
           title="Developer mode"

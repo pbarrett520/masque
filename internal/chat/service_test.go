@@ -113,12 +113,29 @@ func (f *fixture) waitEvent(t *testing.T, name string) emitted {
 	}
 }
 
-func (f *fixture) startWithModel(t *testing.T) State {
+// openStarter runs the first-launch seed and opens a chat with the
+// first bundled starter (WREN), which is what a new user does from the
+// Characters tab.
+func (f *fixture) openStarter(t *testing.T) State {
 	t.Helper()
-	state, err := f.svc.StartChat()
-	if err != nil {
+	if _, err := f.svc.StartChat(); err != nil {
 		t.Fatalf("StartChat: %v", err)
 	}
+	chars, err := f.store.ListCharacters()
+	if err != nil || len(chars) == 0 {
+		t.Fatalf("no starters seeded: %v", err)
+	}
+	// ListCharacters is newest-first; the seed makes WREN the newest.
+	state, err := f.svc.OpenChat(chars[0].ID)
+	if err != nil {
+		t.Fatalf("OpenChat: %v", err)
+	}
+	return state
+}
+
+func (f *fixture) startWithModel(t *testing.T) State {
+	t.Helper()
+	state := f.openStarter(t)
 	if err := f.svc.SetModel(state.ChatID, "ollama", "fake-model"); err != nil {
 		t.Fatalf("SetModel: %v", err)
 	}
@@ -130,12 +147,18 @@ func TestStartChatSeedsGreeting(t *testing.T) {
 	if err := f.store.SetSetting("user.display_name", `"Pat"`); err != nil {
 		t.Fatal(err)
 	}
-
-	state, err := f.svc.StartChat()
+	// A fresh install has no chat to resume: the Characters tab is the
+	// landing screen.
+	first, err := f.svc.StartChat()
 	if err != nil {
 		t.Fatalf("StartChat: %v", err)
 	}
-	if state.CharacterName != "Ember" {
+	if first.ChatID != 0 {
+		t.Errorf("fresh install should not auto-open a chat: %+v", first)
+	}
+
+	state := f.openStarter(t)
+	if state.CharacterName != "WREN" {
 		t.Errorf("character = %q", state.CharacterName)
 	}
 	if len(state.Messages) != 1 {
@@ -148,11 +171,11 @@ func TestStartChatSeedsGreeting(t *testing.T) {
 	if strings.Contains(greeting.Content, "{{") {
 		t.Errorf("greeting has unsubstituted macros: %q", greeting.Content)
 	}
-	if !strings.Contains(greeting.Content, "Pat") {
-		t.Errorf("greeting not substituted with persona name: %q", greeting.Content)
+	if greeting.SwipeCount != 2 {
+		t.Errorf("WREN's alternate greeting should be a swipe: %+v", greeting)
 	}
 
-	// Second start resumes the same chat without reseeding.
+	// Next start resumes the same chat without reseeding.
 	again, err := f.svc.StartChat()
 	if err != nil {
 		t.Fatalf("StartChat (resume): %v", err)
@@ -167,14 +190,14 @@ func TestStartChatSeedsGreeting(t *testing.T) {
 
 func TestStartChatRecoversFromStaleChatID(t *testing.T) {
 	f := newFixture(t)
-	if err := f.store.SetSetting("chat.dev_chat_id", "9999"); err != nil {
+	if err := f.store.SetSetting("chat.active_chat_id", "9999"); err != nil {
 		t.Fatal(err)
 	}
 	state, err := f.svc.StartChat()
 	if err != nil {
 		t.Fatalf("StartChat: %v", err)
 	}
-	if state.ChatID == 9999 || len(state.Messages) != 1 {
+	if state.ChatID != 0 {
 		t.Errorf("stale chat id not recovered: %+v", state)
 	}
 }
@@ -212,7 +235,7 @@ func TestSendStreamsAndPersists(t *testing.T) {
 	if req.Model != "fake-model" {
 		t.Errorf("model = %q", req.Model)
 	}
-	if !strings.Contains(req.System, "Ember") {
+	if !strings.Contains(req.System, "WREN") {
 		t.Errorf("system prompt missing character:\n%s", req.System)
 	}
 	if len(req.Messages) != 2 {
@@ -241,10 +264,7 @@ func TestSendStreamsAndPersists(t *testing.T) {
 
 func TestSendValidation(t *testing.T) {
 	f := newFixture(t)
-	state, err := f.svc.StartChat()
-	if err != nil {
-		t.Fatal(err)
-	}
+	state := f.openStarter(t)
 	if _, err := f.svc.Send(state.ChatID, "   "); err == nil {
 		t.Error("empty message: want error")
 	}
@@ -338,10 +358,7 @@ func TestProviderErrorEmitsErrorEvent(t *testing.T) {
 
 func TestSetModelPersistsDefault(t *testing.T) {
 	f := newFixture(t)
-	state, err := f.svc.StartChat()
-	if err != nil {
-		t.Fatal(err)
-	}
+	state := f.openStarter(t)
 	if err := f.svc.SetModel(state.ChatID, "ollama", "fake-model"); err != nil {
 		t.Fatalf("SetModel: %v", err)
 	}
