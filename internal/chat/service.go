@@ -21,6 +21,7 @@ import (
 	"masque/internal/provider/anthropic"
 	"masque/internal/provider/ollama"
 	"masque/internal/provider/openai"
+	"masque/internal/starters"
 	"masque/internal/store"
 )
 
@@ -30,7 +31,6 @@ const (
 	settingChatID      = "chat.dev_chat_id" // legacy M1.2 single chat; migrated to Ember on seed
 	settingActiveChar  = "chat.active_character_id"
 	settingActiveChat  = "chat.active_chat_id"
-	settingEmberID     = "seed.ember_character_id"
 	settingOllamaURL   = "provider.ollama.base_url"
 	settingProvider    = "provider.default_id"
 	settingModel       = "provider.default_model"
@@ -278,9 +278,6 @@ func (s *Service) StartChat() (State, error) {
 		// Deleted since last run: fall back to the character path.
 	}
 	id := s.int64Setting(settingActiveChar)
-	if id == 0 {
-		id = s.int64Setting(settingEmberID)
-	}
 	if id == 0 {
 		return State{}, nil
 	}
@@ -861,7 +858,7 @@ func (s *Service) stateForChatID(chatID int64) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	name := hardcodedCharacter.Name
+	name := ""
 	if characterID != 0 {
 		if _, parsed, err := s.loadCharacter(characterID); err == nil {
 			name = parsed.DisplayName()
@@ -952,11 +949,12 @@ func (s *Service) generate(ctx context.Context, chat store.Chat, swipeGroup int6
 		return
 	}
 	req := provider.ChatRequest{
-		Model:    chat.Model,
-		Messages: built.Messages,
-		System:   built.System,
-		Params:   params,
-		NoStream: s.streamingDisabled(),
+		Model:       chat.Model,
+		Messages:    built.Messages,
+		System:      built.System,
+		PostHistory: built.PostHistory,
+		Params:      params,
+		NoStream:    s.streamingDisabled(),
 	}
 
 	// Capture the inspector record before sending: segment breakdown
@@ -1116,26 +1114,7 @@ func (s *Service) restoreSwipe(chatID, swipeGroup int64) {
 func (s *Service) ensureStarterCharacter() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok, err := s.store.GetSetting(settingEmberID); err != nil {
-		return err
-	} else if ok {
-		return nil
-	}
-	char, err := s.store.CreateCharacter(hardcodedCharacter.Name, starterCardJSON(), nil)
-	if err != nil {
-		return fmt.Errorf("seeding starter character: %w", err)
-	}
-	// Adopt the M1.2-era dev chat, which predates character rows.
-	if legacyID := s.int64Setting(settingChatID); legacyID != 0 {
-		if owner, err := s.store.ChatCharacterID(legacyID); err == nil && owner == 0 {
-			if _, found, err := s.store.GetChat(legacyID); err == nil && found {
-				if err := s.store.LinkChatCharacter(legacyID, char.ID); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return s.store.SetSetting(settingEmberID, fmt.Sprintf("%d", char.ID))
+	return starters.Seed(s.store)
 }
 
 // characterForChat loads the prompt view of a chat's character. Chats
@@ -1146,7 +1125,7 @@ func (s *Service) characterForChat(chatID int64) (prompt.Character, error) {
 		return prompt.Character{}, err
 	}
 	if charID == 0 {
-		return hardcodedCharacter, nil
+		return prompt.Character{}, fmt.Errorf("chat %d has no character", chatID)
 	}
 	char, ok, err := s.store.GetCharacter(charID)
 	if err != nil {
@@ -1166,6 +1145,8 @@ func (s *Service) characterForChat(chatID int64) (prompt.Character, error) {
 		Scenario:     parsed.Scenario,
 		SystemPrompt: parsed.SystemPrompt,
 		FirstMes:     parsed.FirstMes,
+		MesExample:   parsed.MesExample,
+		PostHistory:  parsed.PostHistoryInstructions,
 	}, nil
 }
 

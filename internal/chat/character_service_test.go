@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"masque/internal/provider"
+	"masque/internal/starters"
 )
 
 // importedCardJSON is a V3 card as the character service would store it.
@@ -27,59 +28,76 @@ func importedCardJSON(name, nickname string) string {
 	}`, name, nickname)
 }
 
-func TestStartChatSeedsStarterCharacterRow(t *testing.T) {
+func TestStartChatSeedsStarters(t *testing.T) {
 	f := newFixture(t)
 	state, err := f.svc.StartChat()
 	if err != nil {
 		t.Fatalf("StartChat: %v", err)
 	}
-	if state.ChatID == 0 || state.CharacterID == 0 || state.CharacterName != "Ember" {
-		t.Fatalf("state = %+v", state)
+	if state.ChatID != 0 {
+		t.Fatalf("fresh install should land on the Characters tab: %+v", state)
 	}
-	chars, err := f.store.ListCharacters()
-	if err != nil || len(chars) != 1 || chars[0].Name != "Ember" {
-		t.Errorf("characters after seed = %+v err=%v", chars, err)
+	names := func() []string {
+		chars, err := f.store.ListCharacters()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := make([]string, len(chars))
+		for i, c := range chars {
+			out[i] = c.Name // library (display) order
+		}
+		return out
 	}
-	// Seeding is once-only, even across service restarts.
-	again, err := f.svc.StartChat()
+	if got := names(); fmt.Sprint(got) != "[WREN The Narrator Lǎo Zhāng]" {
+		t.Errorf("seeded characters = %v", got)
+	}
+	for _, c := range names() {
+		if c == "Ember" {
+			t.Error("Ember must not be seeded")
+		}
+	}
+	// Seeding is once-only, even across restarts.
+	if _, err := f.svc.StartChat(); err != nil {
+		t.Fatal(err)
+	}
+	if got := names(); len(got) != 3 {
+		t.Errorf("reseeded: %v", got)
+	}
+	// A deleted starter stays deleted after a restart…
+	chars, _ := f.store.ListCharacters()
+	var narrator int64
+	for _, c := range chars {
+		if c.Name == "The Narrator" {
+			narrator = c.ID
+		}
+	}
+	if err := f.store.SoftDeleteCharacter(narrator); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.StartChat(); err != nil {
+		t.Fatal(err)
+	}
+	if got := names(); fmt.Sprint(got) != "[WREN Lǎo Zhāng]" {
+		t.Errorf("deleted starter came back on restart: %v", got)
+	}
+	// …until the user asks for it, and edited ones are left alone.
+	for _, c := range chars {
+		if c.Name == "WREN" {
+			full, _, _ := f.store.GetCharacter(c.ID)
+			if err := f.store.UpdateCharacter(c.ID, "WREN (mine)", full.CardJSON, nil, false); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	restored, err := starters.Restore(f.store)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Restore: %v", err)
 	}
-	if again.ChatID != state.ChatID {
-		t.Errorf("resume opened a different chat: %d != %d", again.ChatID, state.ChatID)
+	if fmt.Sprint(restored) != "[The Narrator]" {
+		t.Errorf("restored = %v, want only The Narrator", restored)
 	}
-	chars, _ = f.store.ListCharacters()
-	if len(chars) != 1 {
-		t.Errorf("reseeded: %d characters", len(chars))
-	}
-}
-
-func TestStartChatAdoptsLegacyDevChat(t *testing.T) {
-	f := newFixture(t)
-	// Simulate an M1.2/M1.3 database: characterless chat + setting.
-	legacy, err := f.store.CreateChat("Ember", "ollama", "old-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.store.AppendMessage(legacy.ID, provider.RoleAssistant, "old greeting", 2, false); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.store.SetSetting("chat.dev_chat_id", fmt.Sprintf("%d", legacy.ID)); err != nil {
-		t.Fatal(err)
-	}
-
-	state, err := f.svc.StartChat()
-	if err != nil {
-		t.Fatalf("StartChat: %v", err)
-	}
-	if state.ChatID != legacy.ID {
-		t.Errorf("adopted chat = %d, want legacy %d", state.ChatID, legacy.ID)
-	}
-	if len(state.Messages) != 1 || state.Messages[0].Content != "old greeting" {
-		t.Errorf("legacy history lost: %+v", state.Messages)
-	}
-	if state.Model != "old-model" {
-		t.Errorf("legacy model lost: %q", state.Model)
+	if got := names(); fmt.Sprint(got) != "[The Narrator WREN (mine) Lǎo Zhāng]" {
+		t.Errorf("after restore = %v", got)
 	}
 }
 
@@ -88,10 +106,12 @@ func TestStartChatWithNoCharacters(t *testing.T) {
 	if _, err := f.svc.StartChat(); err != nil {
 		t.Fatal(err)
 	}
-	// User deletes the starter character.
+	// User deletes every starter.
 	chars, _ := f.store.ListCharacters()
-	if err := f.store.DeleteCharacter(chars[0].ID); err != nil {
-		t.Fatal(err)
+	for _, c := range chars {
+		if err := f.store.DeleteCharacter(c.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	state, err := f.svc.StartChat()
 	if err != nil {
@@ -99,6 +119,9 @@ func TestStartChatWithNoCharacters(t *testing.T) {
 	}
 	if state.ChatID != 0 {
 		t.Errorf("deleted character resurrected: %+v", state)
+	}
+	if left, _ := f.store.ListCharacters(); len(left) != 0 {
+		t.Errorf("starters reseeded: %+v", left)
 	}
 }
 

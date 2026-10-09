@@ -361,3 +361,16 @@ func TestNewDefaultsAndTrailingSlash(t *testing.T) {
 		t.Errorf("base URL = %q, want trailing slash trimmed", got)
 	}
 }
+
+func TestPostHistoryIsTrailingSystemMessage(t *testing.T) {
+	body, _ := buildChatBody(provider.ChatRequest{
+		Model:       "m",
+		System:      "sys",
+		Messages:    []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+		PostHistory: "remember the rules",
+	})
+	n := len(body.Messages)
+	if n != 3 || body.Messages[n-1].Role != provider.RoleSystem || body.Messages[n-1].Content != "remember the rules" {
+		t.Errorf("messages = %+v", body.Messages)
+	}
+}

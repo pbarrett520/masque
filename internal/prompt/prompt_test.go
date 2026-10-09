@@ -230,3 +230,34 @@ func TestBuildHistorySegments(t *testing.T) {
 		t.Errorf("history segment sources = %q, %q", hist[0].Source, hist[1].Source)
 	}
 }
+
+func TestBuildIncludesExamplesAndPostHistory(t *testing.T) {
+	res := Build(Input{
+		Character: Character{
+			Name:        "WREN",
+			Description: "a ship AI",
+			MesExample:  "<START>\n{{user}}: hi\n{{char}}: \"Noted.\"",
+			PostHistory: "Call {{user}} Crew 04.",
+		},
+		Persona: Persona{Name: "Pat"},
+		History: []provider.Message{{Role: provider.RoleUser, Content: "hello"}},
+	})
+	if !strings.Contains(res.System, "Example dialogue, showing WREN's voice:\n<START>\nPat: hi\nWREN: \"Noted.\"") {
+		t.Errorf("examples missing or unsubstituted:\n%s", res.System)
+	}
+	if res.PostHistory != "Call Pat Crew 04." {
+		t.Errorf("post-history = %q", res.PostHistory)
+	}
+	if strings.Contains(res.System, "Crew 04") {
+		t.Error("post-history must not be folded into the system prompt")
+	}
+	last := res.Segments[len(res.Segments)-1]
+	if last.Name != "post_history" || last.Source != "card.post_history_instructions" || last.Content != "Call Pat Crew 04." {
+		t.Errorf("post-history should be the last segment, got %+v", last)
+	}
+	// Without either field nothing changes.
+	plain := Build(Input{Character: Character{Name: "X"}, History: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	if plain.PostHistory != "" || strings.Contains(plain.System, "Example dialogue") {
+		t.Errorf("empty fields leaked: %+v", plain)
+	}
+}
