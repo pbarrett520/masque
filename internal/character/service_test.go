@@ -109,3 +109,7 @@ func TestCreateAndDelete(t *testing.T) {
 		t.Errorf("after delete: %+v", list)
 	}
 }
+
+func base64Of(s string) string {
+	return base64.StdEncoding.EncodeToString([]byte(s))
+}

@@ -11,6 +11,9 @@ import (
 type App struct {
 	mu  sync.Mutex
 	ctx context.Context
+	// onStartup receives the runtime context once Wails is up; services
+	// that need it for native dialogs register here.
+	onStartup []func(context.Context)
 }
 
 // NewApp creates the App.
@@ -22,7 +25,11 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.mu.Lock()
 	a.ctx = ctx
+	hooks := a.onStartup
 	a.mu.Unlock()
+	for _, h := range hooks {
+		h(ctx)
+	}
 }
 
 // emit forwards an event to the frontend, dropping it if the runtime

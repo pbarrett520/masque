@@ -245,12 +245,15 @@ type MessageView struct {
 // State is what the chat screen needs to render. A zero ChatID means
 // there is nothing to resume — the frontend shows the characters screen.
 type State struct {
-	ChatID        int64         `json:"chatId"`
-	CharacterID   int64         `json:"characterId"`
-	CharacterName string        `json:"characterName"`
-	ProviderID    string        `json:"providerId"`
-	Model         string        `json:"model"`
-	Messages      []MessageView `json:"messages"`
+	ChatID        int64  `json:"chatId"`
+	CharacterID   int64  `json:"characterId"`
+	CharacterName string `json:"characterName"`
+	// CharacterDeleted means the chat is read-only: its character was
+	// deleted, history stays, nothing new can be generated.
+	CharacterDeleted bool          `json:"characterDeleted"`
+	ProviderID       string        `json:"providerId"`
+	Model            string        `json:"model"`
+	Messages         []MessageView `json:"messages"`
 }
 
 // DonePayload accompanies the chat:{id}:done event.
@@ -281,9 +284,9 @@ func (s *Service) StartChat() (State, error) {
 	if id == 0 {
 		return State{}, nil
 	}
-	if _, ok, err := s.store.GetCharacter(id); err != nil {
+	if c, ok, err := s.store.GetCharacter(id); err != nil {
 		return State{}, err
-	} else if !ok {
+	} else if !ok || c.DeletedAt != 0 {
 		return State{}, nil // deleted since last run
 	}
 	return s.OpenChat(id)
@@ -339,9 +342,18 @@ func (s *Service) OpenChatByID(chatID int64) (State, error) {
 	if characterID == 0 {
 		return State{}, fmt.Errorf("chat %d has no character", chatID)
 	}
-	_, parsed, err := s.loadCharacter(characterID)
+	// Resuming must work for deleted characters too (read-only chat),
+	// so read the row directly rather than through loadCharacter.
+	char, ok, err := s.store.GetCharacter(characterID)
 	if err != nil {
 		return State{}, err
+	}
+	if !ok {
+		return State{}, fmt.Errorf("character %d does not exist", characterID)
+	}
+	parsed, err := card.ParseJSON([]byte(char.CardJSON))
+	if err != nil {
+		return State{}, fmt.Errorf("character %q has an unreadable card: %w", char.Name, err)
 	}
 	return s.activate(chat, characterID, parsed.DisplayName())
 }
@@ -357,6 +369,26 @@ func (s *Service) DeleteChat(chatID int64) error {
 	return s.store.DeleteChat(chatID)
 }
 
+// errDeletedCharacter is returned for any action that would generate
+// new turns for a deleted character's chat.
+var errDeletedCharacter = errors.New("this character was deleted; the chat can be read but not continued")
+
+// chatContinuable fails when the chat's character was deleted.
+func (s *Service) chatContinuable(chatID int64) error {
+	charID, err := s.store.ChatCharacterID(chatID)
+	if err != nil || charID == 0 {
+		return err
+	}
+	c, ok, err := s.store.GetCharacter(charID)
+	if err != nil {
+		return err
+	}
+	if ok && c.DeletedAt != 0 {
+		return errDeletedCharacter
+	}
+	return nil
+}
+
 // loadCharacter fetches a character row and its parsed card.
 func (s *Service) loadCharacter(characterID int64) (store.Character, card.Card, error) {
 	char, ok, err := s.store.GetCharacter(characterID)
@@ -365,6 +397,9 @@ func (s *Service) loadCharacter(characterID int64) (store.Character, card.Card, 
 	}
 	if !ok {
 		return store.Character{}, card.Card{}, fmt.Errorf("character %d does not exist", characterID)
+	}
+	if char.DeletedAt != 0 {
+		return store.Character{}, card.Card{}, errDeletedCharacter
 	}
 	parsed, err := card.ParseJSON([]byte(char.CardJSON))
 	if err != nil {
@@ -432,12 +467,13 @@ func (s *Service) stateForChat(chat store.Chat, characterID int64, characterName
 		providerID = "ollama"
 	}
 	state := State{
-		ChatID:        chat.ID,
-		CharacterID:   characterID,
-		CharacterName: characterName,
-		ProviderID:    providerID,
-		Model:         chat.Model,
-		Messages:      make([]MessageView, 0, len(msgs)),
+		ChatID:           chat.ID,
+		CharacterID:      characterID,
+		CharacterName:    characterName,
+		CharacterDeleted: s.chatContinuable(chat.ID) != nil,
+		ProviderID:       providerID,
+		Model:            chat.Model,
+		Messages:         make([]MessageView, 0, len(msgs)),
 	}
 	for _, m := range msgs {
 		mv := MessageView{ID: m.ID, Role: m.Role, Content: m.Content, Truncated: m.Truncated}
@@ -531,6 +567,9 @@ func (s *Service) Send(chatID int64, text string) (MessageView, error) {
 	if !ok {
 		return MessageView{}, fmt.Errorf("chat %d does not exist", chatID)
 	}
+	if err := s.chatContinuable(chatID); err != nil {
+		return MessageView{}, err
+	}
 	if chat.Model == "" {
 		return MessageView{}, errors.New("no model selected")
 	}
@@ -569,6 +608,9 @@ func (s *Service) Regenerate(chatID int64) error {
 	}
 	if !ok {
 		return fmt.Errorf("chat %d does not exist", chatID)
+	}
+	if err := s.chatContinuable(chatID); err != nil {
+		return err
 	}
 	if chat.Model == "" {
 		return errors.New("no model selected")

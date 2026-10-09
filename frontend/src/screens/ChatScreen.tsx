@@ -209,6 +209,13 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
   const [samplerOpen, setSamplerOpen] = useState(false);
   const [inspectId, setInspectId] = useState<number | null>(null);
 
+  // App re-resolves the chat after events it can't see from here (a
+  // character delete); adopt the fresh state when it arrives.
+  useEffect(() => {
+    setState(initial);
+    setMessages(initial.messages ?? []);
+  }, [initial]);
+
   // Token deltas are batched to state on a short timer rather than per
   // event (dev spec §2 streaming perf note). A timer, not
   // requestAnimationFrame: WebKitGTK can stall rAF entirely (NVIDIA /
@@ -386,13 +393,21 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
   const last = messages[messages.length - 1];
   const canRegenerate =
     !!last &&
+    !state.characterDeleted &&
     last.role === "assistant" &&
     messages.some((m) => m.role === "user");
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 pb-3">
-        <h2 className="font-title text-xl leading-none">{state.characterName}</h2>
+        <h2 className="font-title text-xl leading-none">
+          {state.characterName}
+          {state.characterDeleted && (
+            <span className="ml-2 font-sans text-xs font-normal text-muted-foreground">
+              deleted
+            </span>
+          )}
+        </h2>
         <span className="flex-1" />
         <Select
           className="h-8"
@@ -529,9 +544,13 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
           className="max-h-48 text-[0.9667rem]"
           value={input}
           placeholder={
-            state.model ? "Say something… (Shift+Enter for a new line)" : "Select a model to start"
+            state.characterDeleted
+              ? "This character was deleted. The chat can be read but not continued."
+              : state.model
+                ? "Say something… (Shift+Enter for a new line)"
+                : "Select a model to start"
           }
-          disabled={streaming || !state.model}
+          disabled={streaming || !state.model || state.characterDeleted}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -545,7 +564,7 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
             Stop
           </Button>
         ) : (
-          <Button onClick={send} disabled={!input.trim() || !state.model}>
+          <Button onClick={send} disabled={!input.trim() || !state.model || state.characterDeleted}>
             Send
           </Button>
         )}
