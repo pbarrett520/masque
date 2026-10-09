@@ -15,6 +15,7 @@ import (
 
 	"masque/internal/card"
 	"masque/internal/devlog"
+	"masque/internal/presets"
 	"masque/internal/prompt"
 	"masque/internal/provider"
 	"masque/internal/provider/anthropic"
@@ -26,18 +27,14 @@ import (
 // Settings keys the service reads/writes. The frontend shares
 // user.display_name and the provider.* config keys (settings screen).
 const (
-	settingChatID       = "chat.dev_chat_id" // legacy M1.2 single chat; migrated to Ember on seed
-	settingActiveChar   = "chat.active_character_id"
-	settingActiveChat   = "chat.active_chat_id"
-	settingEmberID      = "seed.ember_character_id"
-	settingOllamaURL    = "provider.ollama.base_url"
-	settingOpenAIURL    = "provider.openai.base_url"
-	settingOpenAIKey    = "provider.openai.api_key"
-	settingAnthropicURL = "provider.anthropic.base_url"
-	settingAnthropicKey = "provider.anthropic.api_key"
-	settingProvider     = "provider.default_id"
-	settingModel        = "provider.default_model"
-	settingDisplayName  = "user.display_name"
+	settingChatID      = "chat.dev_chat_id" // legacy M1.2 single chat; migrated to Ember on seed
+	settingActiveChar  = "chat.active_character_id"
+	settingActiveChat  = "chat.active_chat_id"
+	settingEmberID     = "seed.ember_character_id"
+	settingOllamaURL   = "provider.ollama.base_url"
+	settingProvider    = "provider.default_id"
+	settingModel       = "provider.default_model"
+	settingDisplayName = "user.display_name"
 
 	// Dev-mode endpoint config (§9). Timeout bounds a whole generation;
 	// streaming=false asks providers for unstreamed completions. The
@@ -50,6 +47,12 @@ const (
 
 // showTimeout bounds the /api/show metadata call before each generation.
 const showTimeout = 5 * time.Second
+
+// Per-provider settings keys. Cloud presets (internal/presets) and the
+// Ollama entry share the naming: provider.<id>.<field>.
+func keySetting(providerID string) string       { return "provider." + providerID + ".api_key" }
+func urlSetting(providerID string) string       { return "provider." + providerID + ".base_url" }
+func lastModelSetting(providerID string) string { return "provider." + providerID + ".last_model" }
 
 // EmitFunc delivers a Wails event to the frontend.
 type EmitFunc func(event string, args ...any)
@@ -64,19 +67,21 @@ type contextWindower interface {
 // The dev-mode override settings win when set; the table values are
 // deliberately conservative — budgeting short only wastes headroom.
 func (s *Service) staticContextWindow(providerID string) int {
-	switch providerID {
-	case "anthropic":
+	preset, ok := s.presets.Find(providerID)
+	if !ok {
+		return 0 // Ollama: prompt.Build applies its own default
+	}
+	switch preset.Format {
+	case presets.FormatAnthropic:
 		if n := s.int64Setting(settingClaudeCtxWin); n > 0 {
 			return int(n)
 		}
 		return 200_000
-	case "openai":
+	default:
 		if n := s.int64Setting(settingOpenAICtxWin); n > 0 {
 			return int(n)
 		}
 		return 16_384 // covers OpenRouter/LM Studio/llama.cpp defaults
-	default:
-		return 0 // prompt.Build applies its own default
 	}
 }
 
@@ -85,6 +90,7 @@ type Service struct {
 	store       *store.Store
 	emit        EmitFunc
 	log         *devlog.Log                                // nil disables request logging
+	presets     *presets.Registry                          // cloud provider presets
 	providerFor func(id string) (provider.Provider, error) // test seam
 
 	mu       sync.Mutex
@@ -98,6 +104,7 @@ func NewService(st *store.Store, emit EmitFunc, log *devlog.Log) *Service {
 		store:    st,
 		emit:     emit,
 		log:      log,
+		presets:  presets.MustLoad(),
 		inflight: map[int64]context.CancelFunc{},
 	}
 	s.providerFor = s.buildProvider
@@ -106,17 +113,31 @@ func NewService(st *store.Store, emit EmitFunc, log *devlog.Log) *Service {
 
 // buildProvider constructs the provider for id from current settings.
 // Providers are stateless (spec §4): keys and base URLs are read fresh
-// on every call so settings changes apply to the next request.
+// on every call so settings changes apply to the next request. Cloud
+// ids are preset ids: the preset supplies the format and base URL, the
+// settings supply the key (and, for custom presets, the base URL; a
+// provider.<id>.base_url setting overrides any preset's URL).
 func (s *Service) buildProvider(id string) (provider.Provider, error) {
-	switch id {
-	case "", "ollama":
+	if id == "" || id == "ollama" {
 		return ollama.New(s.stringSetting(settingOllamaURL)), nil
-	case "openai":
-		return openai.New(s.stringSetting(settingOpenAIURL), s.stringSetting(settingOpenAIKey)), nil
-	case "anthropic":
-		return anthropic.New(s.stringSetting(settingAnthropicURL), s.stringSetting(settingAnthropicKey)), nil
-	default:
+	}
+	preset, ok := s.presets.Find(id)
+	if !ok {
 		return nil, fmt.Errorf("unknown provider %q", id)
+	}
+	baseURL := s.stringSetting(urlSetting(id))
+	if baseURL == "" {
+		baseURL = preset.BaseURL
+	}
+	if baseURL == "" {
+		return nil, fmt.Errorf("%s: set a base URL in Settings first", preset.Label)
+	}
+	key := s.stringSetting(keySetting(id))
+	switch preset.Format {
+	case presets.FormatAnthropic:
+		return anthropic.New(baseURL, key), nil
+	default:
+		return openai.New(baseURL, key), nil
 	}
 }
 
@@ -124,18 +145,89 @@ func (s *Service) buildProvider(id string) (provider.Provider, error) {
 type ProviderInfo struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
+	// Format is "ollama", or the preset's API format.
+	Format string `json:"format"`
+	// Custom presets take a user-supplied base URL and an optional key.
+	Custom bool `json:"custom"`
+	// KeyURL is where the user creates an API key ("" for local).
+	KeyURL string `json:"keyUrl"`
+	// BaseURL is the effective endpoint: the preset's, or the user's
+	// override/custom URL.
+	BaseURL string `json:"baseUrl"`
+	// Configured is true when the provider can be used as set up now:
+	// Ollama always, cloud presets once a key is saved, custom presets
+	// once a base URL is saved.
+	Configured bool `json:"configured"`
 	// NeedsKey is true when the provider is unusable until an API key
-	// is configured in settings.
+	// is saved.
 	NeedsKey bool `json:"needsKey"`
 }
 
-// Providers lists the selectable providers in display order.
+// Providers lists every selectable provider: Ollama first, then the
+// cloud presets in registry order. The frontend filters to Configured
+// ones for the chat picker and shows all in Settings.
 func (s *Service) Providers() []ProviderInfo {
-	return []ProviderInfo{
-		{ID: "ollama", Label: "Ollama"},
-		{ID: "openai", Label: "OpenAI-compatible", NeedsKey: false},
-		{ID: "anthropic", Label: "Anthropic", NeedsKey: s.stringSetting(settingAnthropicKey) == ""},
+	out := []ProviderInfo{{ID: "ollama", Label: "Ollama", Format: "ollama", Configured: true}}
+	for _, p := range s.presets.Presets {
+		info := ProviderInfo{ID: p.ID, Label: p.Label, Format: p.Format, Custom: p.Custom, KeyURL: p.KeyURL}
+		info.BaseURL = s.stringSetting(urlSetting(p.ID))
+		if info.BaseURL == "" {
+			info.BaseURL = p.BaseURL
+		}
+		hasKey := s.stringSetting(keySetting(p.ID)) != ""
+		if p.Custom {
+			info.Configured = info.BaseURL != ""
+		} else {
+			info.Configured = hasKey
+			info.NeedsKey = !hasKey
+		}
+		out = append(out, info)
 	}
+	return out
+}
+
+// Catalog lists what the model picker shows for providerID: the
+// endpoint's chat-capable models, the preset's recommended ones, and
+// the model to preselect (dev spec §9, "normie mode just works"). A
+// successful listing doubles as the key check; failures are reported
+// in the catalog rather than as an error so the pinned models remain
+// pickable when a host has no list endpoint.
+func (s *Service) Catalog(providerID string) (presets.Catalog, error) {
+	if providerID == "" {
+		providerID = "ollama"
+	}
+	p, err := s.providerFor(providerID)
+	if err != nil {
+		return presets.Catalog{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	listed, listErr := p.ListModels(ctx)
+	last := s.stringSetting(lastModelSetting(providerID))
+
+	preset, ok := s.presets.Find(providerID)
+	if !ok {
+		// Ollama: the provider already filters to chat-capable models
+		// and there is no curated roster here (that is the starter
+		// list in ollamamgr). Recommended stays empty.
+		c := presets.Catalog{ProviderID: providerID, Recommended: []presets.Model{}, All: []presets.Model{}}
+		if listErr != nil {
+			c.ListError = listErr.Error()
+			return c, nil
+		}
+		c.Listed = true
+		for _, m := range listed {
+			c.All = append(c.All, presets.Model{ID: m.ID, Label: m.ID})
+			if m.ID == last {
+				c.Default = last
+			}
+		}
+		if c.Default == "" && len(c.All) > 0 {
+			c.Default = c.All[0].ID
+		}
+		return c, nil
+	}
+	return s.presets.BuildCatalog(preset, listed, listErr, last), nil
 }
 
 // MessageView is a message as the frontend renders it. SwipeCount > 1
@@ -408,7 +500,11 @@ func (s *Service) SetModel(chatID int64, providerID, model string) error {
 	if err := s.store.SetChatModel(chatID, providerID, model); err != nil {
 		return err
 	}
-	for key, value := range map[string]string{settingProvider: providerID, settingModel: model} {
+	for key, value := range map[string]string{
+		settingProvider:              providerID,
+		settingModel:                 model,
+		lastModelSetting(providerID): model, // restored by Catalog next time
+	} {
 		raw, err := json.Marshal(value)
 		if err != nil {
 			return fmt.Errorf("encoding %s setting: %w", key, err)

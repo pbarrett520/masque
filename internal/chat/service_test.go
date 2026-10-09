@@ -18,6 +18,8 @@ type fakeProvider struct {
 	errOnOpen     error                  // ChatStream fails immediately
 	holdOpen      bool                   // after script, wait for ctx cancel then emit Err
 	contextWindow int
+	models        []provider.ModelInfo // ListModels result; nil = one fake-model
+	listErr       error                // ListModels failure
 
 	reqs chan provider.ChatRequest
 }
@@ -29,6 +31,12 @@ func newFakeProvider() *fakeProvider {
 func (f *fakeProvider) ID() string                        { return "fake" }
 func (f *fakeProvider) HealthCheck(context.Context) error { return nil }
 func (f *fakeProvider) ListModels(context.Context) ([]provider.ModelInfo, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	if f.models != nil {
+		return f.models, nil
+	}
 	return []provider.ModelInfo{{ID: "fake-model"}}, nil
 }
 

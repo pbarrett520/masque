@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import {
@@ -12,10 +11,12 @@ import {
 } from "@/components/ui/card";
 import { setSetting as SetSetting } from "@/lib/settings";
 import { Status } from "../../wailsjs/go/ollamamgr/Service";
-import { Health, ListModels } from "../../wailsjs/go/chat/Service";
+import { Providers } from "../../wailsjs/go/chat/Service";
 import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { ollamamgr, provider } from "../../wailsjs/go/models";
+import { chat, ollamamgr, presets } from "../../wailsjs/go/models";
 import StarterModelList from "@/components/StarterModelList";
+import CloudProviderForm, { describeCatalog } from "@/components/CloudProviderForm";
+import ModelPicker from "@/components/ModelPicker";
 
 type Step = "welcome" | "local" | "pick-model" | "cloud";
 
@@ -127,7 +128,7 @@ function WelcomeStep({
         <button className={choice} onClick={onCloud}>
           <div className="font-medium">In the cloud with my API key</div>
           <div className="mt-0.5 text-sm text-muted-foreground">
-            Use OpenRouter, OpenAI, Anthropic, or any compatible service.
+            OpenAI, Anthropic, OpenRouter, Gemini, and more. Bring an API key.
           </div>
         </button>
       </div>
@@ -242,42 +243,25 @@ function CloudStep({
   onBack: () => void;
   onError: (msg: string) => void;
 }) {
-  const [providerId, setProviderId] = useState("openai");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [models, setModels] = useState<provider.ModelInfo[]>([]);
+  const [providers, setProviders] = useState<chat.ProviderInfo[]>([]);
+  const [providerId, setProviderId] = useState("");
+  const [catalog, setCatalog] = useState<presets.Catalog | null>(null);
   const [model, setModel] = useState("");
-  const [testing, setTesting] = useState(false);
-  const [tested, setTested] = useState(false);
 
-  const keySetting = `provider.${providerId}.api_key`;
-  const urlSetting = `provider.${providerId}.base_url`;
+  useEffect(() => {
+    Providers()
+      .then((all) => {
+        const cloud = (all ?? []).filter((p) => p.format !== "ollama");
+        setProviders(cloud);
+        if (cloud.length > 0) setProviderId(cloud[0].id);
+      })
+      .catch((err) => onError(String(err)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const test = async () => {
-    setTesting(true);
-    setTested(false);
-    setModels([]);
-    setModel("");
-    onError("");
-    try {
-      // Save first: providers read settings fresh on every call.
-      await SetSetting(urlSetting, baseUrl.trim() === "" ? null : baseUrl.trim());
-      await SetSetting(keySetting, apiKey.trim() === "" ? null : apiKey.trim());
-      const health = await Health(providerId);
-      if (health) {
-        onError(`Connection failed: ${health}`);
-        return;
-      }
-      const list = (await ListModels(providerId)) ?? [];
-      setModels(list);
-      setTested(true);
-      if (list.length > 0) setModel(list[0].id);
-    } catch (err) {
-      onError(String(err));
-    } finally {
-      setTesting(false);
-    }
-  };
+  const provider = providers.find((p) => p.id === providerId);
+  const named = providers.filter((p) => !p.custom);
+  const custom = providers.filter((p) => p.custom);
 
   return (
     <Card>
@@ -297,59 +281,51 @@ function CloudStep({
             value={providerId}
             onChange={(e) => {
               setProviderId(e.target.value);
-              setTested(false);
-              setModels([]);
+              setCatalog(null);
               setModel("");
+              onError("");
             }}
           >
-            <option value="openai">OpenAI-compatible (OpenRouter, LM Studio, …)</option>
-            <option value="anthropic">Anthropic</option>
+            {named.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+            {custom.length > 0 && (
+              <optgroup label="Something else">
+                {custom.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </Select>
         </div>
-        {providerId === "openai" && (
-          <div className="space-y-1.5">
-            <Label htmlFor="ob-url">Base URL</Label>
-            <Input
-              id="ob-url"
-              placeholder="https://openrouter.ai/api/v1"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-            />
-          </div>
-        )}
-        <div className="space-y-1.5">
-          <Label htmlFor="ob-key">API key</Label>
-          <Input
-            id="ob-key"
-            type="password"
-            placeholder={providerId === "anthropic" ? "sk-ant-…" : "sk-…"}
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
+        {provider && (
+          <CloudProviderForm
+            key={provider.id}
+            provider={provider}
+            onError={onError}
+            onConnected={(c) => {
+              setCatalog(c);
+              setModel(c.default);
+              onError("");
+            }}
           />
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={() => void test()} disabled={testing}>
-            {testing ? "Testing…" : "Test connection"}
-          </Button>
-          <Button variant="ghost" onClick={onBack}>
-            Back
-          </Button>
-        </div>
-        {tested && (
-          <div className="space-y-1.5">
+        )}
+        {catalog && provider && (
+          <div className="space-y-1.5 border-t border-border pt-3">
+            <p className="text-sm text-muted-foreground">
+              {describeCatalog(catalog, provider.label)}
+            </p>
             <Label htmlFor="ob-model">Model</Label>
-            <Select
+            <ModelPicker
               id="ob-model"
-              className="w-full"
+              catalog={catalog}
               value={model}
-              onChange={(e) => setModel(e.target.value)}
-            >
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.id}
-                </option>
-              ))}
-            </Select>
+              onChange={setModel}
+            />
             <Button
               className="mt-2"
               disabled={!model}
@@ -359,6 +335,11 @@ function CloudStep({
             </Button>
           </div>
         )}
+        <div>
+          <Button variant="ghost" onClick={onBack}>
+            Back
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
