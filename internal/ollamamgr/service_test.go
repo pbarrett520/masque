@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"masque/internal/store"
+	"masque/internal/sysinfo"
 )
 
 // collectEmits records emitted events, safe for concurrent emitters.
@@ -99,11 +100,29 @@ func TestStatusReachableAndNot(t *testing.T) {
 	}
 }
 
-// fakeOllama serves tags and a scripted pull stream.
+// loadedFixture is one entry of a fake /api/ps response.
+type loadedFixture struct {
+	name     string
+	sizeVRAM int64
+}
+
+// fakeOllama serves tags, a scripted pull stream, and an empty ps.
 func fakeOllama(t *testing.T, installed []string, pullLines []string) *httptest.Server {
+	t.Helper()
+	return fakeOllamaWith(t, installed, pullLines, nil)
+}
+
+// fakeOllamaWith additionally reports loaded models on /api/ps.
+func fakeOllamaWith(t *testing.T, installed []string, pullLines []string, loaded []loadedFixture) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/api/ps":
+			models := make([]map[string]any, 0, len(loaded))
+			for _, l := range loaded {
+				models = append(models, map[string]any{"name": l.name, "model": l.name, "size": l.sizeVRAM, "size_vram": l.sizeVRAM})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": models})
 		case "/api/tags":
 			models := make([]map[string]any, 0, len(installed))
 			for _, name := range installed {
@@ -130,8 +149,8 @@ func TestRecommendedAnnotatesInstalledAndFits(t *testing.T) {
 	defer srv.Close()
 
 	svc, _ := newTestService(t, srv.URL)
-	svc.totalRAM = func() uint64 { return 16 << 30 }               // 16GB machine…
-	svc.gpuMemory = func() (uint64, bool) { return 8 << 30, true } // …with an 8GB GPU
+	svc.totalRAM = func() uint64 { return 16 << 30 }                           // 16GB machine…
+	svc.detect = discrete("NVIDIA GeForce RTX 2070 SUPER", 8192<<20, 6658<<20) // …with the tester's 8GB GPU
 
 	models, err := svc.Recommended()
 	if err != nil {
@@ -147,18 +166,23 @@ func TestRecommendedAnnotatesInstalledAndFits(t *testing.T) {
 	if byName["Stheno v3.2"].Installed {
 		t.Errorf("Stheno should not be installed")
 	}
-	if byName["Impish LLAMA"].Fit != FitGPU || byName["Stheno v3.2"].Fit != FitGPU {
-		t.Errorf("small models should fit an 8GB GPU: %+v", models)
+	// Usable budget: 6658 MiB free minus the 512 MiB margin ≈ 6.4 GB.
+	// The 4B (≈4.4 GB) fits; the 8B (≈7.0 GB) and 12B (≈10 GB) spill
+	// into the 16 GB of RAM; the 24B (≈18.3 GB) exceeds even that.
+	if byName["Impish LLAMA"].Fit != FitGPU {
+		t.Errorf("4B should fit the 2070's free VRAM: %+v", byName["Impish LLAMA"])
 	}
-	if byName["Mag Mell R1"].Fit != FitSplit {
-		t.Errorf("12B should split across 8GB VRAM + 16GB RAM: %+v", byName["Mag Mell R1"])
+	if byName["Stheno v3.2"].Fit != FitSplit || byName["Mag Mell R1"].Fit != FitSplit {
+		t.Errorf("8B/12B should split across 6.4GB usable VRAM + 16GB RAM: %q %q",
+			byName["Stheno v3.2"].Fit, byName["Mag Mell R1"].Fit)
 	}
-	if byName["Cydonia"].Fit != FitSplit || !byName["Cydonia"].Fits {
-		t.Errorf("24B on 8GB VRAM + 16GB RAM should be a soft split, got %+v", byName["Cydonia"])
+	if byName["Cydonia"].Fit != FitTight || byName["Cydonia"].Fits {
+		t.Errorf("24B on 8GB VRAM + 16GB RAM should be tight, got %+v", byName["Cydonia"])
 	}
 	for _, m := range models {
-		if m.VRAMBytes != 8<<30 || m.RAMBytes != 16<<30 || m.NeedBytes <= m.DownloadBytes {
-			t.Errorf("measurements not surfaced on %s: %+v", m.Name, m)
+		if m.Machine.VRAMTotalBytes != 8192<<20 || m.Machine.VRAMFreeBytes != 6658<<20 || m.RAMBytes != 16<<30 ||
+			m.VRAMBytes != (6658<<20)-safetyMargin || m.NeedBytes <= m.DownloadBytes || m.Machine.GPUName == "" {
+			t.Errorf("measurements not surfaced on %s: %+v", m.Name, m.Machine)
 		}
 	}
 }
@@ -170,7 +194,7 @@ func TestRecommendedBigGPUFitsCydonia(t *testing.T) {
 	defer srv.Close()
 	svc, _ := newTestService(t, srv.URL)
 	svc.totalRAM = func() uint64 { return 31 << 30 }
-	svc.gpuMemory = func() (uint64, bool) { return 24 << 30, true }
+	svc.detect = discrete("NVIDIA GeForce RTX 4090", 24564<<20, 23411<<20)
 
 	models, err := svc.Recommended()
 	if err != nil {
@@ -188,7 +212,7 @@ func TestRecommendedRAMOnlyMachine(t *testing.T) {
 	defer srv.Close()
 	svc, _ := newTestService(t, srv.URL)
 	svc.totalRAM = func() uint64 { return 8 << 30 }
-	svc.gpuMemory = func() (uint64, bool) { return 0, false }
+	svc.detect = func() sysinfo.Report { return sysinfo.Report{} } // no GPU
 
 	models, err := svc.Recommended()
 	if err != nil {
@@ -214,7 +238,7 @@ func TestRecommendedUnknownHardwareFitsEverything(t *testing.T) {
 	defer srv.Close()
 	svc, _ := newTestService(t, srv.URL)
 	svc.totalRAM = func() uint64 { return 0 }
-	svc.gpuMemory = func() (uint64, bool) { return 0, false }
+	svc.detect = func() sysinfo.Report { return sysinfo.Report{Notes: []string{"probe failed"}} }
 
 	models, err := svc.Recommended()
 	if err != nil {
@@ -227,16 +251,171 @@ func TestRecommendedUnknownHardwareFitsEverything(t *testing.T) {
 	}
 }
 
-func TestMachineReportsSeams(t *testing.T) {
-	svc, _ := newTestService(t, "")
-	svc.totalRAM = func() uint64 { return 31 << 30 }
-	svc.gpuMemory = func() (uint64, bool) { return 24 << 30, true }
-	if m := svc.Machine(); m.RAMBytes != 31<<30 || m.VRAMBytes != 24<<30 {
-		t.Errorf("Machine = %+v", m)
+// discrete is a detect seam returning one discrete card.
+func discrete(name string, total, free uint64) func() sysinfo.Report {
+	return func() sysinfo.Report {
+		return sysinfo.Report{GPUs: []sysinfo.GPU{{Vendor: sysinfo.VendorNVIDIA, Name: name, TotalBytes: total, FreeBytes: free, Source: "test"}}}
 	}
-	svc.gpuMemory = func() (uint64, bool) { return 12345, false }
-	if m := svc.Machine(); m.VRAMBytes != 0 {
-		t.Errorf("ok=false must report VRAM 0, got %+v", m)
+}
+
+func TestMachineBudgetsFromTheBestGPUOnly(t *testing.T) {
+	svc, _ := newTestService(t, "http://127.0.0.1:1") // Ollama down: nothing resident
+	svc.totalRAM = func() uint64 { return 31 << 30 }
+	// This dev box: 4090 next to a 512 MiB APU. The APU must not add.
+	svc.detect = func() sysinfo.Report {
+		return sysinfo.Report{GPUs: []sysinfo.GPU{
+			{Vendor: sysinfo.VendorNVIDIA, Name: "NVIDIA GeForce RTX 4090", TotalBytes: 24564 << 20, FreeBytes: 23411 << 20, Source: "nvidia-smi"},
+			{Vendor: sysinfo.VendorAMD, Name: "AMD integrated graphics", TotalBytes: 512 << 20, FreeBytes: 492 << 20, Integrated: true, Source: "amdgpu sysfs card1"},
+		}}
+	}
+	m := svc.Machine()
+	if m.GPUKind != "discrete" || m.GPUName != "NVIDIA GeForce RTX 4090" {
+		t.Errorf("pick = %s %q", m.GPUKind, m.GPUName)
+	}
+	if m.VRAMTotalBytes != 24564<<20 || m.VRAMFreeBytes != 23411<<20 {
+		t.Errorf("total/free = %d/%d MiB, want 24564/23411", m.VRAMTotalBytes>>20, m.VRAMFreeBytes>>20)
+	}
+	if want := int64(23411<<20) - safetyMargin; m.VRAMBytes != want {
+		t.Errorf("usable = %d MiB, want free minus margin %d MiB", m.VRAMBytes>>20, want>>20)
+	}
+	for _, want := range []string{"24564 MiB total", "23411 MiB free", "512 MiB total", "never summed"} {
+		if !strings.Contains(m.Detail, want) {
+			t.Errorf("Detail lacks %q: %s", want, m.Detail)
+		}
+	}
+
+	// Detection failure: unknown kind, no budget, RAM still known.
+	svc.detect = func() sysinfo.Report { return sysinfo.Report{Notes: []string{"nvidia-smi failed: exit status 1"}} }
+	if m := svc.Machine(); m.GPUKind != "unknown" || m.VRAMBytes != 0 || m.RAMBytes != 31<<30 || !strings.Contains(m.Detail, "nvidia-smi failed") {
+		t.Errorf("failed detection: %+v", m)
+	}
+}
+
+func TestMachineCountsOllamaResidentModelsAsFree(t *testing.T) {
+	// Ollama holds 6 GiB of a 8 GiB card: free reads 1.5 GiB, but
+	// loading another model evicts the first, so the budget is ~7.5.
+	srv := fakeOllamaWith(t, nil, nil, []loadedFixture{{name: "big:latest", sizeVRAM: 6 << 30}})
+	defer srv.Close()
+	svc, _ := newTestService(t, srv.URL)
+	svc.totalRAM = func() uint64 { return 16 << 30 }
+	svc.detect = discrete("NVIDIA GeForce RTX 2070 SUPER", 8192<<20, 1536<<20)
+	m := svc.Machine()
+	if m.VRAMFreeBytes != (1536<<20)+(6<<30) {
+		t.Errorf("free should include Ollama's share: %d MiB", m.VRAMFreeBytes>>20)
+	}
+	if m.VRAMBytes != m.VRAMFreeBytes-safetyMargin {
+		t.Errorf("usable = %d MiB", m.VRAMBytes>>20)
+	}
+}
+
+func TestRecommendedBadgeFollowsFit(t *testing.T) {
+	srv := fakeOllama(t, nil, nil)
+	defer srv.Close()
+	svc, _ := newTestService(t, srv.URL)
+
+	// The tester's box: 2070 Super with 6.5 GB free, 16 GB RAM. The
+	// old static badge pointed at the 12B; it must now be a model that
+	// fits in the usable 6 GB.
+	svc.totalRAM = func() uint64 { return 16 << 30 }
+	svc.detect = discrete("NVIDIA GeForce RTX 2070 SUPER", 8192<<20, 6658<<20)
+	models, err := svc.Recommended()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec *StarterModel
+	for i := range models {
+		if models[i].Recommended {
+			if rec != nil {
+				t.Fatal("more than one recommended model")
+			}
+			rec = &models[i]
+		}
+	}
+	if rec == nil {
+		t.Fatal("no recommended model")
+	}
+	if rec.Fit != FitGPU {
+		t.Errorf("recommended %s has fit %q, must fit on the GPU", rec.Name, rec.Fit)
+	}
+	if uint64(rec.NeedBytes) > uint64(rec.VRAMBytes) {
+		t.Errorf("recommended %s needs %d MiB but budget is %d MiB", rec.Name, rec.NeedBytes>>20, rec.VRAMBytes>>20)
+	}
+	if rec.Name == "Mag Mell R1" {
+		t.Error("the 12B must not be recommended on an 8 GB card")
+	}
+
+	// 4090: the biggest model that fits on the GPU is recommended.
+	svc.totalRAM = func() uint64 { return 31 << 30 }
+	svc.detect = discrete("NVIDIA GeForce RTX 4090", 24564<<20, 23411<<20)
+	models, _ = svc.Recommended()
+	for _, m := range models {
+		if m.Recommended && m.Name != "Cydonia" {
+			t.Errorf("24 GB card should recommend the 24B, got %s", m.Name)
+		}
+	}
+
+	// Nothing fits on the GPU (integrated only, 8 GB RAM): the smallest.
+	svc.totalRAM = func() uint64 { return 8 << 30 }
+	svc.detect = func() sysinfo.Report {
+		return sysinfo.Report{GPUs: []sysinfo.GPU{{Vendor: sysinfo.VendorAMD, Name: "AMD integrated graphics", TotalBytes: 2 << 30, Integrated: true}}}
+	}
+	models, _ = svc.Recommended()
+	for _, m := range models {
+		if m.Recommended && m.Name != "Impish LLAMA" {
+			t.Errorf("iGPU-only box should recommend the smallest, got %s", m.Name)
+		}
+		if m.Machine.GPUKind != "integrated" || m.VRAMBytes != 0 {
+			t.Errorf("iGPU-only must budget from RAM: %+v", m.Machine)
+		}
+	}
+
+	// Unmeasurable: the manifest default keeps the badge.
+	svc.totalRAM = func() uint64 { return 0 }
+	svc.detect = func() sysinfo.Report { return sysinfo.Report{Notes: []string{"probe failed"}} }
+	models, _ = svc.Recommended()
+	for _, m := range models {
+		if m.Recommended != (m.Name == "Mag Mell R1") {
+			t.Errorf("unknown hardware: badge on %s = %v", m.Name, m.Recommended)
+		}
+	}
+}
+
+func TestRecommendedAppleSilicon(t *testing.T) {
+	srv := fakeOllama(t, nil, nil)
+	defer srv.Close()
+	svc, _ := newTestService(t, srv.URL)
+	svc.detect = func() sysinfo.Report {
+		return sysinfo.Report{GPUs: []sysinfo.GPU{{Vendor: sysinfo.VendorApple, Name: "Apple M3", Integrated: true, Source: "sysctl"}}}
+	}
+	fits := func(ram uint64) map[string]Fit {
+		svc.totalRAM = func() uint64 { return ram }
+		models, err := svc.Recommended()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]Fit{}
+		for _, m := range models {
+			out[m.Name] = m.Fit
+			if !m.Machine.Unified || m.Machine.GPUKind != "unified" {
+				t.Errorf("apple must be unified: %+v", m.Machine)
+			}
+		}
+		return out
+	}
+	// 16 GB: GPU share is 2/3 ≈ 10.7 GB minus margin ≈ 10.2 GB. The
+	// 12B needs ≈ 10.0 GB → fits; the 24B does not and cannot spill.
+	f16 := fits(16 << 30)
+	if f16["Impish LLAMA"] != FitGPU || f16["Stheno v3.2"] != FitGPU {
+		t.Errorf("16 GB: small models should fit: %v", f16)
+	}
+	if f16["Cydonia"] != FitTight {
+		t.Errorf("16 GB: 24B must be tight, got %q", f16["Cydonia"])
+	}
+	// 64 GB: 3/4 = 48 GB; everything fits.
+	for name, fit := range fits(64 << 30) {
+		if fit != FitGPU {
+			t.Errorf("64 GB: %s = %q", name, fit)
+		}
 	}
 }
 
