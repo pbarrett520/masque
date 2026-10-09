@@ -16,6 +16,14 @@ import {
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import { ollamamgr, provider } from "../../wailsjs/go/models";
 import StarterModelList, { formatBytes } from "@/components/StarterModelList";
+import CloudProviderForm, {
+  describeCatalog,
+  keySetting,
+  urlSetting,
+} from "@/components/CloudProviderForm";
+import { Providers } from "../../wailsjs/go/chat/Service";
+import { Select } from "@/components/ui/select";
+import { chat } from "../../wailsjs/go/models";
 
 type Theme = "light" | "dark";
 
@@ -253,6 +261,146 @@ function LocalModelsCard({ onStatus }: { onStatus: (s: string) => void }) {
   );
 }
 
+// CloudProvidersCard lists the cloud providers that have a key saved,
+// with change/remove, and an "Add" picker for the rest. Connecting
+// runs the model-list check (CloudProviderForm) so a bad key is caught
+// here rather than on the first message.
+function CloudProvidersCard({ onStatus }: { onStatus: (s: string) => void }) {
+  const [providers, setProviders] = useState<chat.ProviderInfo[]>([]);
+  const [editing, setEditing] = useState(""); // provider id with an open form
+  const [adding, setAdding] = useState(""); // provider id chosen in the Add select
+
+  const refresh = async () => {
+    try {
+      setProviders(((await Providers()) ?? []).filter((p) => p.format !== "ollama"));
+    } catch (err) {
+      onStatus(String(err));
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const remove = async (p: chat.ProviderInfo) => {
+    if (!window.confirm(`Remove ${p.label}? Its API key is deleted from this machine.`)) {
+      return;
+    }
+    try {
+      await setSetting(keySetting(p.id), null);
+      if (p.custom) await setSetting(urlSetting(p.id), null);
+      onStatus(`Removed ${p.label}.`);
+      setEditing("");
+      void refresh();
+    } catch (err) {
+      onStatus(String(err));
+    }
+  };
+
+  const configured = providers.filter((p) => p.configured);
+  const available = providers.filter((p) => !p.configured);
+  const addTarget = providers.find((p) => p.id === adding);
+
+  return (
+    <Section
+      title="Cloud providers"
+      description="Keys stay on this machine and are only ever sent to the provider itself."
+    >
+      <div className="space-y-5">
+        {configured.length > 0 && (
+          <ul className="divide-y divide-border">
+            {configured.map((p) => (
+              <li key={p.id} className="py-2">
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="font-medium">{p.label}</span>
+                  {p.custom && (
+                    <span className="truncate font-mono text-[0.8667rem] text-muted-foreground">
+                      {p.baseUrl}
+                    </span>
+                  )}
+                  <span className="flex-1" />
+                  <button
+                    className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setEditing(editing === p.id ? "" : p.id)}
+                  >
+                    {editing === p.id ? "Cancel" : "Change key"}
+                  </button>
+                  <button
+                    className="shrink-0 text-xs text-muted-foreground hover:text-destructive"
+                    onClick={() => void remove(p)}
+                  >
+                    Remove
+                  </button>
+                </div>
+                {editing === p.id && (
+                  <div className="mt-3 max-w-md">
+                    <CloudProviderForm
+                      provider={p}
+                      action="Save and test"
+                      autoFocus
+                      onError={(m) => m && onStatus(m)}
+                      onConnected={(c) => {
+                        onStatus(describeCatalog(c, p.label));
+                        setEditing("");
+                        void refresh();
+                      }}
+                    />
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="add-provider">Add a provider</Label>
+            <Select
+              id="add-provider"
+              className="block w-full max-w-md"
+              value={adding}
+              onChange={(e) => setAdding(e.target.value)}
+            >
+              <option value="">Choose a provider…</option>
+              {available
+                .filter((p) => !p.custom)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              <optgroup label="Something else">
+                {available
+                  .filter((p) => p.custom)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+              </optgroup>
+            </Select>
+          </div>
+          {addTarget && (
+            <div className="max-w-md">
+              <CloudProviderForm
+                key={addTarget.id}
+                provider={addTarget}
+                autoFocus
+                onError={(m) => m && onStatus(m)}
+                onConnected={(c) => {
+                  onStatus(describeCatalog(c, addTarget.label));
+                  setAdding("");
+                  void refresh();
+                }}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 export default function SettingsScreen({ theme, onThemeChange, dev, onDevChange }: Props) {
   const [dbPath, setDbPath] = useState("");
   const [status, setStatus] = useState("");
@@ -289,42 +437,7 @@ export default function SettingsScreen({ theme, onThemeChange, dev, onDevChange 
 
         <LocalModelsCard onStatus={setStatus} />
 
-        <Section
-          title="OpenAI-compatible"
-          description="OpenRouter, LM Studio, vLLM, llama.cpp server, or OpenAI. The base URL includes /v1, for example https://openrouter.ai/api/v1. Local servers usually need no key."
-        >
-          <div className="space-y-3">
-            <SettingField
-              spec={{
-                key: "provider.openai.base_url",
-                label: "Base URL",
-                placeholder: "https://openrouter.ai/api/v1",
-              }}
-              onStatus={setStatus}
-            />
-            <SettingField
-              spec={{
-                key: "provider.openai.api_key",
-                label: "API key",
-                placeholder: "sk-or-…",
-                secret: true,
-              }}
-              onStatus={setStatus}
-            />
-          </div>
-        </Section>
-
-        <Section title="Anthropic" description="Direct Claude API access.">
-          <SettingField
-            spec={{
-              key: "provider.anthropic.api_key",
-              label: "API key",
-              placeholder: "sk-ant-…",
-              secret: true,
-            }}
-            onStatus={setStatus}
-          />
-        </Section>
+        <CloudProvidersCard onStatus={setStatus} />
 
         <Section
           title="Developer mode"

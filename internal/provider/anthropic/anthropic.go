@@ -99,7 +99,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]provider.ModelInfo, error)
 	}
 	defer resp.Body.Close() //nolint:errcheck // read-only body
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("listing anthropic models: status %d: %s", resp.StatusCode, readError(resp.Body))
+		return nil, &provider.HTTPError{Op: "listing anthropic models", Status: resp.StatusCode, Message: readError(resp.Body)}
 	}
 	var body struct {
 		Data []struct {

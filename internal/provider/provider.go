@@ -7,6 +7,8 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 )
 
 // Message roles, matching the CHECK constraint on messages.role.
@@ -33,6 +35,26 @@ type Provider interface {
 	HealthCheck(ctx context.Context) error
 }
 
+// HTTPError is a non-2xx response from an endpoint. Callers that need
+// to distinguish "key rejected" from "endpoint doesn't support this"
+// (the model-list fallback in internal/presets) unwrap to it with
+// errors.As.
+type HTTPError struct {
+	Op      string // what was attempted, e.g. "listing models"
+	Status  int
+	Message string // server-supplied detail, may be empty
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("%s: status %d: %s", e.Op, e.Status, e.Message)
+}
+
+// Unauthorized reports whether the status means the credentials were
+// rejected.
+func (e *HTTPError) Unauthorized() bool {
+	return e.Status == http.StatusUnauthorized || e.Status == http.StatusForbidden
+}
+
 // ModelInfo describes one available model.
 type ModelInfo struct {
 	ID         string `json:"id"`         // name used in ChatRequest.Model
@@ -40,6 +62,11 @@ type ModelInfo struct {
 	Family     string `json:"family"`     // e.g. "llama", "" if unknown
 	Quant      string `json:"quant"`      // e.g. "Q4_K_M", "" if unknown
 	ModifiedAt string `json:"modifiedAt"` // RFC3339, "" if unknown
+	// Chat is the endpoint's own verdict on whether the model can chat,
+	// when its listing carries one (OpenRouter's output modalities,
+	// Together's type, Mistral's capabilities). nil means no metadata:
+	// the caller decides from the id (internal/presets exclude patterns).
+	Chat *bool `json:"chat,omitempty"`
 }
 
 // Message is one turn of conversation history.

@@ -1,0 +1,555 @@
+{
+  "comment": "Cloud provider presets (data file: revise per release, no code change needed). Each preset's baseUrl is what the OpenAI- or Anthropic-format provider is pointed at; pinned are 2-4 chat models shown under Recommended, first one available becomes the default. lastVerified is the date the base URL and pinned ids were checked against the provider's official docs. exclude_patterns are case-insensitive regexes applied to model ids when the endpoint supplies no capability metadata; a matching id is never shown as a chat model or auto-selected. Custom presets take a user-supplied base URL.",
+  "exclude_patterns": [
+    "embed",
+    "voyage",
+    "\\btts\\b|-tts|tts-",
+    "whisper",
+    "transcri",
+    "audio",
+    "realtime",
+    "moderation",
+    "dall-e|dalle",
+    "image",
+    "sora",
+    "rerank",
+    "guard",
+    "\\bocr\\b|-ocr",
+    "speech|voice",
+    "video",
+    "diffusion|flux|sdxl|stable-",
+    "computer-use",
+    "turbo-instruct",
+    "codex",
+    "deep-research",
+    "^babbage|^davinci|^ada\\b|^curie",
+    "^bge-|^e5-|^gte-|/bge-|/e5-|/gte-",
+    "vae|clip|upscal"
+  ],
+  "presets": [
+    {
+      "id": "openai",
+      "label": "OpenAI",
+      "format": "openai",
+      "baseUrl": "https://api.openai.com/v1",
+      "keyUrl": "https://platform.openai.com/settings/organization/api-keys",
+      "pinned": [
+        {
+          "id": "gpt-6-luna",
+          "label": "GPT-6 Luna",
+          "note": "Fast and cheap"
+        },
+        {
+          "id": "gpt-6.1-sol",
+          "label": "GPT-6.1 Sol",
+          "note": "Balanced; close to the flagship at a fraction of the cost"
+        },
+        {
+          "id": "gpt-6-astra",
+          "label": "GPT-6 Astra",
+          "note": "Strongest"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "anthropic",
+      "label": "Anthropic",
+      "format": "anthropic",
+      "baseUrl": "https://api.anthropic.com",
+      "keyUrl": "https://platform.claude.com/settings/keys",
+      "pinned": [
+        {
+          "id": "claude-haiku-5-5",
+          "label": "Claude Haiku 5.5",
+          "note": "Fast and cheap"
+        },
+        {
+          "id": "claude-sonnet-5-5",
+          "label": "Claude Sonnet 5.5",
+          "note": "Balanced; strong prose for the price"
+        },
+        {
+          "id": "claude-opus-5-5",
+          "label": "Claude Opus 5.5",
+          "note": "Anthropic's recommended default"
+        },
+        {
+          "id": "claude-fable-5-1",
+          "label": "Claude Fable 5.1",
+          "note": "Strongest; slower"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "openrouter",
+      "label": "OpenRouter",
+      "format": "openai",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "keyUrl": "https://openrouter.ai/keys",
+      "pinned": [
+        {
+          "id": "deepseek/deepseek-v4.1-flash",
+          "label": "DeepSeek V4.1 Flash",
+          "note": "Most-used for roleplay on OpenRouter; cheap"
+        },
+        {
+          "id": "z-ai/glm-5.3-flash",
+          "label": "GLM 5.3 Flash",
+          "note": "Roleplay favorite; cheapest of the set"
+        },
+        {
+          "id": "xiaomi/mimo-v2.6-flash",
+          "label": "MiMo V2.6 Flash",
+          "note": "Roleplay favorite; fast"
+        },
+        {
+          "id": "tencent/hy4-preview",
+          "label": "Hy4 Preview",
+          "note": "Top-3 for roleplay; strongest of the set"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "gemini",
+      "label": "Google Gemini",
+      "format": "openai",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "keyUrl": "https://aistudio.google.com/apikey",
+      "pinned": [
+        {
+          "id": "gemini-3.5-flash-lite",
+          "label": "Gemini 3.5 Flash-Lite",
+          "note": "Fast and cheap"
+        },
+        {
+          "id": "gemini-3.8-flash",
+          "label": "Gemini 3.8 Flash",
+          "note": "Balanced default"
+        },
+        {
+          "id": "gemini-3.1-pro-preview",
+          "label": "Gemini 3.1 Pro (preview)",
+          "note": "Strongest"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "xai",
+      "label": "xAI",
+      "format": "openai",
+      "baseUrl": "https://api.x.ai/v1",
+      "keyUrl": "https://console.x.ai/team/default/api-keys",
+      "pinned": [
+        {
+          "id": "grok-4.20-0309-non-reasoning",
+          "label": "Grok 4.20 (non-reasoning)",
+          "note": "Fast; no thinking step, good for chat"
+        },
+        {
+          "id": "grok-4.3",
+          "label": "Grok 4.3",
+          "note": "Balanced"
+        },
+        {
+          "id": "grok-4.7",
+          "label": "Grok 4.7",
+          "note": "Strongest"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "deepseek",
+      "label": "DeepSeek",
+      "format": "openai",
+      "baseUrl": "https://api.deepseek.com",
+      "keyUrl": "https://platform.deepseek.com/api_keys",
+      "pinned": [
+        {
+          "id": "deepseek-flash",
+          "label": "DeepSeek V4.1 Flash",
+          "note": "Fast and cheap"
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "label": "DeepSeek V4 Pro",
+          "note": "Strongest"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "mistral",
+      "label": "Mistral",
+      "format": "openai",
+      "baseUrl": "https://api.mistral.ai/v1",
+      "keyUrl": "https://console.mistral.ai",
+      "pinned": [
+        {
+          "id": "mistral-small-latest",
+          "label": "Mistral Small",
+          "note": "Fast and cheap"
+        },
+        {
+          "id": "mistral-medium-latest",
+          "label": "Mistral Medium",
+          "note": "Balanced; Mistral's recommended default"
+        },
+        {
+          "id": "mistral-large-4",
+          "label": "Mistral Large 4 (preview)",
+          "note": "Strongest"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "groq",
+      "label": "Groq",
+      "format": "openai",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "keyUrl": "https://console.groq.com/keys",
+      "pinned": [
+        {
+          "id": "llama-3.1-8b-instant",
+          "label": "Llama 3.1 8B Instant",
+          "note": "Fast and cheap"
+        },
+        {
+          "id": "llama-3.3-70b-versatile",
+          "label": "Llama 3.3 70B Versatile",
+          "note": "Balanced"
+        },
+        {
+          "id": "openai/gpt-oss-120b",
+          "label": "GPT-OSS 120B",
+          "note": "Strongest; reasoning model"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "together",
+      "label": "Together AI",
+      "format": "openai",
+      "baseUrl": "https://api.together.ai/v1",
+      "keyUrl": "https://api.together.ai/settings/projects/~current/api-keys",
+      "pinned": [
+        {
+          "id": "zai-org/GLM-5.3-Flash",
+          "label": "GLM 5.3 Flash",
+          "note": "Fast and cheap"
+        },
+        {
+          "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+          "label": "DeepSeek V4.1 Flash",
+          "note": "Balanced"
+        },
+        {
+          "id": "zai-org/GLM-5.3",
+          "label": "GLM 5.3",
+          "note": "Strong open flagship"
+        },
+        {
+          "id": "moonshotai/Kimi-K3",
+          "label": "Kimi K3",
+          "note": "Strongest"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "fireworks",
+      "label": "Fireworks AI",
+      "format": "openai",
+      "baseUrl": "https://api.fireworks.ai/inference/v1",
+      "keyUrl": "https://app.fireworks.ai/settings/users/api-keys",
+      "partialList": true,
+      "pinned": [
+        {
+          "id": "accounts/fireworks/models/gpt-oss-120b",
+          "label": "GPT-OSS 120B",
+          "note": "Fast and cheap"
+        },
+        {
+          "id": "accounts/fireworks/models/minimax-m3",
+          "label": "MiniMax M3",
+          "note": "Balanced"
+        },
+        {
+          "id": "accounts/fireworks/models/glm-5p3",
+          "label": "GLM 5.3",
+          "note": "Strong open flagship"
+        },
+        {
+          "id": "accounts/fireworks/models/kimi-k3",
+          "label": "Kimi K3",
+          "note": "Strongest"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "cerebras",
+      "label": "Cerebras",
+      "format": "openai",
+      "baseUrl": "https://api.cerebras.ai/v1",
+      "keyUrl": "https://cloud.cerebras.ai",
+      "pinned": [
+        {
+          "id": "qwen-3.8-27b",
+          "label": "Qwen 3.8 27B",
+          "note": "Very fast; reasoning on by default"
+        },
+        {
+          "id": "gpt-oss-120b",
+          "label": "GPT-OSS 120B",
+          "note": "Fastest; bigger model"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "deepinfra",
+      "label": "DeepInfra",
+      "format": "openai",
+      "baseUrl": "https://api.deepinfra.com/v1/openai",
+      "keyUrl": "https://deepinfra.com/dash/api_keys",
+      "pinned": [
+        {
+          "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+          "label": "DeepSeek V4 Flash",
+          "note": "Fast and cheap"
+        },
+        {
+          "id": "zai-org/GLM-5.3",
+          "label": "GLM-5.3",
+          "note": "Balanced"
+        },
+        {
+          "id": "deepseek-ai/DeepSeek-V4-Pro",
+          "label": "DeepSeek V4 Pro",
+          "note": "Strong, still affordable"
+        },
+        {
+          "id": "moonshotai/Kimi-K3",
+          "label": "Kimi K3",
+          "note": "Strongest"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "moonshot",
+      "label": "Moonshot AI (Kimi)",
+      "format": "openai",
+      "baseUrl": "https://api.moonshot.ai/v1",
+      "keyUrl": "https://platform.kimi.ai/console/api-keys",
+      "pinned": [
+        {
+          "id": "kimi-k2.6",
+          "label": "Kimi K2.6",
+          "note": "Cheaper general model"
+        },
+        {
+          "id": "kimi-k3",
+          "label": "Kimi K3",
+          "note": "Strongest; Moonshot's recommended default"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "zai",
+      "label": "Z.ai (GLM)",
+      "format": "openai",
+      "baseUrl": "https://api.z.ai/api/paas/v4",
+      "keyUrl": "https://z.ai/manage-apikey/apikey-list",
+      "pinned": [
+        {
+          "id": "glm-5.3-flash",
+          "label": "GLM-5.3 Flash",
+          "note": "Cheapest"
+        },
+        {
+          "id": "glm-5.3-flashx",
+          "label": "GLM-5.3 FlashX",
+          "note": "Fast"
+        },
+        {
+          "id": "glm-5.3",
+          "label": "GLM-5.3",
+          "note": "Strongest"
+        }
+      ],
+      "lastVerified": "2026-10-09",
+      "partialList": true
+    },
+    {
+      "id": "alibaba",
+      "label": "Alibaba Model Studio (Qwen)",
+      "format": "openai",
+      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "keyUrl": "https://modelstudio.console.alibabacloud.com/ap-southeast-1/settings/api-key",
+      "pinned": [
+        {
+          "id": "qwen3.8-flash",
+          "label": "Qwen3.8 Flash",
+          "note": "Fast and cheap"
+        },
+        {
+          "id": "qwen3.7-plus",
+          "label": "Qwen3.7 Plus",
+          "note": "Balanced"
+        },
+        {
+          "id": "qwen3.8-max",
+          "label": "Qwen3.8 Max",
+          "note": "Strongest"
+        }
+      ],
+      "lastVerified": "2026-10-09",
+      "partialList": true
+    },
+    {
+      "id": "cohere",
+      "label": "Cohere",
+      "format": "openai",
+      "baseUrl": "https://api.cohere.ai/compatibility/v1",
+      "keyUrl": "https://dashboard.cohere.com/api-keys",
+      "partialList": true,
+      "pinned": [
+        {
+          "id": "command-r7b-12-2024",
+          "label": "Command R7B",
+          "note": "Fast and cheap"
+        },
+        {
+          "id": "command-a-03-2025",
+          "label": "Command A",
+          "note": "Balanced"
+        },
+        {
+          "id": "command-a-plus-05-2026",
+          "label": "Command A+",
+          "note": "Strongest"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "nebius",
+      "label": "Nebius Token Factory",
+      "format": "openai",
+      "baseUrl": "https://api.tokenfactory.nebius.com/v1",
+      "keyUrl": "https://tokenfactory.nebius.com/project/api-keys",
+      "pinned": [
+        {
+          "id": "nvidia/Nemotron-3_5-Lightning",
+          "label": "Nemotron 3.5 Lightning",
+          "note": "Fast and cheap"
+        },
+        {
+          "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+          "label": "DeepSeek V4 Flash",
+          "note": "Balanced"
+        },
+        {
+          "id": "NousResearch/Hermes-4-405B",
+          "label": "Hermes 4 405B",
+          "note": "Popular for roleplay and creative writing"
+        },
+        {
+          "id": "Qwen/Qwen3.5-397B-A17B",
+          "label": "Qwen3.5 397B",
+          "note": "Strongest"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "featherless",
+      "label": "Featherless.ai",
+      "format": "openai",
+      "baseUrl": "https://api.featherless.ai/v1",
+      "keyUrl": "https://featherless.ai/account/api-keys",
+      "partialList": true,
+      "pinned": [
+        {
+          "id": "NousResearch/Hermes-3-Llama-3.1-8B",
+          "label": "Hermes 3 8B",
+          "note": "The site's most-used roleplay model; fast"
+        },
+        {
+          "id": "Gryphe/Pantheon-RP-1.8-24b-Small-3.1",
+          "label": "Pantheon RP 24B",
+          "note": "Balanced roleplay tune"
+        },
+        {
+          "id": "LatitudeGames/Wayfarer-12B",
+          "label": "Wayfarer 12B",
+          "note": "Adventure and roleplay, from AI Dungeon"
+        },
+        {
+          "id": "NousResearch/Hermes-3-Llama-3.1-70B",
+          "label": "Hermes 3 70B",
+          "note": "Strongest popular roleplay pick"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "arliai",
+      "label": "ArliAI",
+      "format": "openai",
+      "baseUrl": "https://api.arliai.com/v1",
+      "keyUrl": "https://www.arliai.com/account",
+      "partialList": true,
+      "pinned": [
+        {
+          "id": "Gemma-4-31B-Gembrain-uncensored-heretic",
+          "label": "Gemma 4 31B Gembrain",
+          "note": "Most-used roleplay chat model; Starter plan"
+        },
+        {
+          "id": "Qwen3.5-27B-Derestricted",
+          "label": "Qwen3.5 27B Derestricted",
+          "note": "Balanced; Starter plan"
+        },
+        {
+          "id": "DeepSeek-V4-Flash-0731",
+          "label": "DeepSeek V4 Flash",
+          "note": "Most-used all-rounder; Core plan or higher"
+        },
+        {
+          "id": "GLM-4.6-Derestricted-v5",
+          "label": "GLM 4.6 Derestricted",
+          "note": "Strongest roleplay pick; Core plan or higher"
+        }
+      ],
+      "lastVerified": "2026-10-09"
+    },
+    {
+      "id": "custom-openai",
+      "label": "Custom (OpenAI-compatible)",
+      "format": "openai",
+      "baseUrl": "",
+      "keyUrl": "",
+      "custom": true,
+      "pinned": []
+    },
+    {
+      "id": "custom-anthropic",
+      "label": "Custom (Anthropic-compatible)",
+      "format": "anthropic",
+      "baseUrl": "",
+      "keyUrl": "",
+      "custom": true,
+      "pinned": []
+    }
+  ]
+}

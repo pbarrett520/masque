@@ -98,19 +98,96 @@ func (p *Provider) ListModels(ctx context.Context) ([]provider.ModelInfo, error)
 	}
 	defer resp.Body.Close() //nolint:errcheck // read-only body
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("listing models: status %d: %s", resp.StatusCode, readError(resp.Body))
+		return nil, &provider.HTTPError{Op: "listing models", Status: resp.StatusCode, Message: readError(resp.Body)}
 	}
-	var body struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
+	return decodeModelList(resp.Body)
+}
+
+// listedModel is one /models entry plus the optional capability
+// metadata some hosts attach. Fields absent from a server's response
+// stay zero and contribute nothing.
+type listedModel struct {
+	ID string `json:"id"`
+	// OpenRouter: architecture.output_modalities ["text"], or the older
+	// architecture.modality "text+image->text".
+	Architecture *struct {
+		Modality         string   `json:"modality"`
+		OutputModalities []string `json:"output_modalities"`
+	} `json:"architecture"`
+	// Together: type is "chat", "language", "image", "embedding",
+	// "moderation", "rerank", "audio", ...
+	Type string `json:"type"`
+	// Mistral: capabilities.completion_chat.
+	Capabilities *struct {
+		CompletionChat *bool `json:"completion_chat"`
+	} `json:"capabilities"`
+}
+
+// nonChatTypes are Together-style type values that can never chat.
+// "language" (base completion models) is left undecided: the id
+// patterns handle those.
+var nonChatTypes = map[string]bool{
+	"image": true, "embedding": true, "moderation": true,
+	"rerank": true, "audio": true, "video": true, "transcribe": true,
+}
+
+// chatVerdict derives ModelInfo.Chat from whatever metadata the entry
+// carries; nil when there is none.
+func (m listedModel) chatVerdict() *bool {
+	verdict := func(v bool) *bool { return &v }
+	if a := m.Architecture; a != nil {
+		// A chat model outputs text and only text: text+image output
+		// models (image generators that also talk) are not what a
+		// roleplay picker should offer.
+		if len(a.OutputModalities) > 0 {
+			for _, mod := range a.OutputModalities {
+				if mod != "text" {
+					return verdict(false)
+				}
+			}
+			return verdict(true)
+		}
+		if _, out, ok := strings.Cut(a.Modality, "->"); ok {
+			return verdict(out == "text")
+		}
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, fmt.Errorf("decoding models: %w", err)
+	if m.Capabilities != nil && m.Capabilities.CompletionChat != nil {
+		return verdict(*m.Capabilities.CompletionChat)
 	}
-	models := make([]provider.ModelInfo, 0, len(body.Data))
-	for _, m := range body.Data {
-		models = append(models, provider.ModelInfo{ID: m.ID})
+	switch t := strings.ToLower(m.Type); {
+	case t == "chat":
+		return verdict(true)
+	case nonChatTypes[t]:
+		return verdict(false)
+	}
+	return nil
+}
+
+// decodeModelList parses a /models body into ModelInfo, carrying over
+// any chat-capability metadata the host provides. The body is the
+// OpenAI {"data": [...]} envelope, or a bare array (Together).
+func decodeModelList(r io.Reader) ([]provider.ModelInfo, error) {
+	raw, err := io.ReadAll(io.LimitReader(r, 64*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("reading models: %w", err)
+	}
+	var entries []listedModel
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '[' {
+		if err := json.Unmarshal(trimmed, &entries); err != nil {
+			return nil, fmt.Errorf("decoding models: %w", err)
+		}
+	} else {
+		var body struct {
+			Data []listedModel `json:"data"`
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			return nil, fmt.Errorf("decoding models: %w", err)
+		}
+		entries = body.Data
+	}
+	models := make([]provider.ModelInfo, 0, len(entries))
+	for _, m := range entries {
+		models = append(models, provider.ModelInfo{ID: m.ID, Chat: m.chatVerdict()})
 	}
 	return models, nil
 }

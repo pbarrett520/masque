@@ -4,7 +4,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import {
   Health,
-  ListModels,
+  Catalog,
   OpenChatByID,
   Providers,
   Regenerate,
@@ -15,7 +15,8 @@ import {
   EditMessage,
 } from "../../wailsjs/go/chat/Service";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
-import { chat, provider } from "../../wailsjs/go/models";
+import { chat, presets } from "../../wailsjs/go/models";
+import ModelPicker from "@/components/ModelPicker";
 import { InspectorModal, SamplerPanel } from "@/components/DevPanels";
 import { Markdown } from "@/components/Markdown";
 
@@ -197,7 +198,7 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
   // Provider shown in the picker; the chat's actual provider only
   // changes once a model is chosen (SetModel).
   const [providerSel, setProviderSel] = useState("ollama");
-  const [models, setModels] = useState<provider.ModelInfo[]>([]);
+  const [catalog, setCatalog] = useState<presets.Catalog | null>(null);
   const [healthErr, setHealthErr] = useState("");
   const [error, setError] = useState("");
   const [input, setInput] = useState("");
@@ -216,13 +217,25 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
   const flushTimerRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const connect = useCallback(async (providerID: string) => {
-    setModels([]);
-    setHealthErr(await Health(providerID));
+  // connect loads the picker catalog for a provider and returns the
+  // model to preselect ("" when none). Ollama keeps its reachability
+  // probe; cloud providers report through the catalog (a rejected key,
+  // or a host with no model list but recommended models to try).
+  const connect = useCallback(async (providerID: string): Promise<string> => {
+    setCatalog(null);
+    setHealthErr("");
     try {
-      setModels((await ListModels(providerID)) ?? []);
-    } catch {
-      setModels([]);
+      const c = await Catalog(providerID);
+      setCatalog(c);
+      if (c.keyRejected) {
+        setHealthErr(`API key rejected: ${c.listError}`);
+      } else if (!c.listed && c.recommended.length === 0) {
+        setHealthErr(providerID === "ollama" ? await Health(providerID) : c.listError);
+      }
+      return c.default ?? "";
+    } catch (err) {
+      setHealthErr(String(err));
+      return "";
     }
   }, []);
 
@@ -238,16 +251,24 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
   }, [initial.chatId]);
 
   useEffect(() => {
-    Providers().then(setProviders).catch(() => {});
-    setProviderSel(initial.providerId || "ollama");
-    void connect(initial.providerId || "ollama");
+    Providers().then((all) => setProviders(all ?? [])).catch(() => {});
+    const pid = initial.providerId || "ollama";
+    setProviderSel(pid);
+    void connect(pid).then((def) => {
+      // A chat without a model yet (fresh install, provider added in
+      // Settings) gets the catalog default so the first message works.
+      if (!initial.model && def) void pickModel(def, pid);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial.chatId]);
 
-  const pickProvider = (id: string) => {
+  // Switching provider in the header also switches the chat to that
+  // provider's default model, so the next message simply goes there.
+  const pickProvider = async (id: string) => {
     setProviderSel(id);
     setError("");
-    void connect(id);
+    const def = await connect(id);
+    if (def) await pickModel(def, id);
   };
 
   useEffect(() => {
@@ -347,11 +368,11 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
     }
   };
 
-  const pickModel = async (model: string) => {
+  const pickModel = async (model: string, providerID = providerSel) => {
     if (!model) return;
     try {
-      await SetModel(state.chatId, providerSel, model);
-      setState(chat.State.createFrom({ ...state, providerId: providerSel, model }));
+      await SetModel(state.chatId, providerID, model);
+      setState((s) => chat.State.createFrom({ ...s, providerId: providerID, model }));
       setError("");
     } catch (err) {
       setError(String(err));
@@ -377,36 +398,27 @@ export default function ChatScreen({ initial, dev, onActivity }: Props) {
           className="h-8"
           aria-label="Provider"
           value={providerSel}
-          onChange={(e) => pickProvider(e.target.value)}
+          onChange={(e) => void pickProvider(e.target.value)}
           disabled={streaming}
         >
-          {providers.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-              {p.needsKey ? " (needs API key)" : ""}
-            </option>
-          ))}
+          {/* Only providers set up in Settings, plus whatever this chat
+              already uses so a removed key doesn't blank the picker. */}
+          {providers
+            .filter((p) => p.configured || p.id === state.providerId)
+            .map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+                {p.needsKey ? " (needs API key)" : ""}
+              </option>
+            ))}
         </Select>
-        <Select
-          className="h-8 max-w-64"
-          aria-label="Model"
+        <ModelPicker
+          compact
+          catalog={catalog}
           value={selectedModel}
-          onChange={(e) => pickModel(e.target.value)}
+          onChange={(id) => void pickModel(id)}
           disabled={streaming}
-        >
-          <option value="" disabled>
-            {models.length ? "Select a model…" : "No models found"}
-          </option>
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.id}
-            </option>
-          ))}
-          {/* Keep a stale selection visible even if it's not offered anymore. */}
-          {selectedModel && !models.some((m) => m.id === selectedModel) && (
-            <option value={selectedModel}>{selectedModel} (missing)</option>
-          )}
-        </Select>
+        />
         <Button
           variant="ghost"
           size="sm"
