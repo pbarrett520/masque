@@ -124,6 +124,11 @@ function ModelManagerCard({ onStatus }: { onStatus: (s: string) => void }) {
       }
     >
       <div className="space-y-5">
+        {machine?.detail && (
+          <p className="font-mono text-xs leading-relaxed text-muted-foreground">
+            {machine.detail}
+          </p>
+        )}
         <div className="space-y-1.5">
           <Label htmlFor="dev-pull">Pull by name</Label>
           <div className="flex gap-2">

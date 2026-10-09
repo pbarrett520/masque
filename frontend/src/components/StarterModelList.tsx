@@ -26,60 +26,69 @@ export function formatBytes(n: number): string {
   return `${n} B`;
 }
 
-// formatMemory renders RAM/VRAM the way spec sheets and nvidia-smi do:
-// whole binary gigabytes ("24 GB" for a 4090), as opposed to
-// formatBytes' decimal download sizes.
+// formatMemory renders RAM/VRAM in binary gigabytes, rounded DOWN to
+// one decimal ("23.9 GB" for a 4090's 24564 MiB, "8 GB" for 8192 MiB).
+// Rounding down means a wrong figure can't hide behind a tidy number;
+// the exact MiB values live in Machine.detail for dev mode.
 export function formatMemory(n: number): string {
-  return `${Math.round(n / 2 ** 30)} GB`;
-}
-
-// Shape shared by ollamamgr.Machine and the measurements copied onto
-// every StarterModel.
-interface Measured {
-  ramBytes: number;
-  vramBytes: number;
-  unified?: boolean;
+  const gb = Math.floor((n / 2 ** 30) * 10) / 10;
+  return `${gb} GB`;
 }
 
 // describeMachine is the one-line "what we measured" shown above the
-// roster and next to the Ollama version on the Dev page, so users can
-// check the fit verdicts against their own hardware.
-export function describeMachine(m: Measured): string {
-  const unmeasured = "Couldn't measure this machine's memory, so nothing is being flagged.";
-  const ram = m.ramBytes > 0 ? formatMemory(m.ramBytes) : "";
-  const vram = m.vramBytes > 0 ? formatMemory(m.vramBytes) : "";
-  if (m.unified) {
-    return ram
-      ? `This machine has ${ram} of unified memory; about three quarters of it is available to the GPU.`
-      : unmeasured;
+// roster and next to the Ollama version on the Dev page, in plain
+// words with the device named, so a wrong detection is visible to the
+// user ("RTX 2070 Super, 8 GB" when the card is a 2070 Super).
+export function describeMachine(m: ollamamgr.Machine): string {
+  const ram = m.ramBytes > 0 ? `${formatMemory(m.ramBytes)} of RAM` : "";
+  const name = m.gpuName || "";
+  switch (m.gpuKind) {
+    case "discrete": {
+      const total = formatMemory(m.vramTotalBytes);
+      const free =
+        m.vramFreeBytes > 0
+          ? ` (about ${formatMemory(m.vramFreeBytes)} free)`
+          : " (free memory couldn't be read, so about 1 GB is assumed in use)";
+      return `${name}, ${total}${free}${ram ? `, with ${ram}` : ""}.`;
+    }
+    case "unified":
+      return ram
+        ? `${name}, ${formatMemory(m.ramBytes)} of unified memory (about ${formatMemory(m.vramBytes)} usable by the GPU).`
+        : `${name}; memory couldn't be measured, so nothing is being flagged.`;
+    case "integrated":
+      return ram
+        ? `${name} is integrated graphics, so models run on the CPU with ${ram}.`
+        : `${name} is integrated graphics; RAM couldn't be measured.`;
+    case "none":
+      return ram
+        ? `No graphics card detected; models run on the CPU with ${ram}.`
+        : "No graphics card detected and RAM couldn't be measured, so nothing is being flagged.";
+    default:
+      return ram
+        ? `Couldn't measure the graphics card${name ? ` (${name})` : ""}; going by ${ram} alone.`
+        : "Couldn't measure this machine's memory, so nothing is being flagged.";
   }
-  if (vram && ram) return `This machine has ${vram} of VRAM and ${ram} of RAM.`;
-  if (vram) return `This machine has ${vram} of VRAM; RAM couldn't be measured.`;
-  if (ram) {
-    return `This machine has ${ram} of RAM and no graphics card we could detect, so models run on the CPU.`;
-  }
-  return unmeasured;
 }
 
 // fitNote is the per-model annotation for the split and tight tiers;
 // gpu and unknown render nothing. Models are never hidden on fit.
 function fitNote(m: ollamamgr.StarterModel): { text: string; warn: boolean } | null {
-  const vram = m.vramBytes > 0 ? `${formatMemory(m.vramBytes)} VRAM` : "";
-  const ram = m.ramBytes > 0 ? `${formatMemory(m.ramBytes)} RAM` : "";
+  const usable = m.vramBytes > 0 ? `${formatMemory(m.vramBytes)} of usable graphics memory` : "";
+  const ram = m.ramBytes > 0 ? `${formatMemory(m.ramBytes)} of RAM` : "";
   switch (m.fit) {
     case "split":
       return {
         warn: false,
-        text: vram
+        text: usable
           ? "Will run partly on CPU; expect slower replies."
           : "Will run on the CPU; expect slower replies.",
       };
     case "tight": {
       const need = formatMemory(m.needBytes);
-      const have = vram
-        ? [vram, ram].filter(Boolean).join(" and ")
+      const have = usable
+        ? [usable, ram].filter(Boolean).join(" and ")
         : ram
-          ? `${ram} and no graphics card we could detect`
+          ? `${ram} and no usable graphics memory`
           : "";
       return {
         warn: true,
@@ -160,7 +169,7 @@ export default function StarterModelList({ onUse, onError }: Props) {
   return (
     <div>
       {models.length > 0 && (
-        <p className="mb-2 text-xs text-muted-foreground">{describeMachine(models[0])}</p>
+        <p className="mb-2 text-xs text-muted-foreground">{describeMachine(models[0].machine)}</p>
       )}
       <ul className="divide-y divide-border">
         {models.map((m) => {

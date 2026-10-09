@@ -11,7 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"runtime"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -48,16 +48,21 @@ type StarterModel struct {
 	// computed memory requirement for models that need more working
 	// room than the standard margin. 0 when the manifest omits it.
 	MinRAMBytes int64 `json:"minRamBytes"`
-	Recommended bool  `json:"recommended"`
-	Installed   bool  `json:"installed"`
+	// Recommended marks the one model to suggest on this machine. In
+	// the manifest it is the fallback for unmeasurable hardware; the
+	// service recomputes it from fit (chooseRecommended).
+	Recommended bool `json:"recommended"`
+	Installed   bool `json:"installed"`
 	// Fit is the tier from classifyFit: FitGPU, FitSplit, FitTight or
 	// FitUnknown. NeedBytes is the requirement it was judged against;
-	// VRAMBytes/RAMBytes are what was measured (0 = unknown), so the
-	// frontend can show the user the numbers behind the verdict.
-	Fit       Fit   `json:"fit"`
-	NeedBytes int64 `json:"needBytes"`
-	VRAMBytes int64 `json:"vramBytes"`
-	RAMBytes  int64 `json:"ramBytes"`
+	// VRAMBytes/RAMBytes are the budget it was judged with (0 =
+	// unknown) and Machine the full measurement, so the frontend can
+	// show the user the numbers behind the verdict.
+	Fit       Fit     `json:"fit"`
+	NeedBytes int64   `json:"needBytes"`
+	VRAMBytes int64   `json:"vramBytes"`
+	RAMBytes  int64   `json:"ramBytes"`
+	Machine   Machine `json:"machine"`
 	// Fits is kept for backward compatibility: true unless Fit is
 	// FitTight. Unknown hardware counts as fitting — flag, never hide.
 	Fits bool `json:"fits"`
@@ -73,11 +78,11 @@ type EmitFunc func(event string, args ...any)
 
 // Service is bound to the Wails frontend as ollamamgr.Service.
 type Service struct {
-	store     *store.Store
-	emit      EmitFunc
-	totalRAM  func() uint64         // test seam
-	gpuMemory func() (uint64, bool) // test seam
-	unified   bool                  // Apple Silicon: GPU shares RAM
+	store    *store.Store
+	emit     EmitFunc
+	totalRAM func() uint64         // test seam
+	detect   func() sysinfo.Report // test seam
+	logOnce  sync.Once             // exact measurements go to the log once per run
 
 	mu         sync.Mutex
 	pullCancel context.CancelFunc // non-nil while a pull is running
@@ -88,11 +93,10 @@ type Service struct {
 // through emit.
 func NewService(st *store.Store, emit EmitFunc) *Service {
 	return &Service{
-		store:     st,
-		emit:      emit,
-		totalRAM:  sysinfo.TotalRAM,
-		gpuMemory: sysinfo.GPUMemory,
-		unified:   runtime.GOOS == "darwin" && runtime.GOARCH == "arm64",
+		store:    st,
+		emit:     emit,
+		totalRAM: sysinfo.TotalRAM,
+		detect:   sysinfo.DetectGPUs,
 	}
 }
 
@@ -149,22 +153,76 @@ func (s *Service) All() ([]provider.ModelInfo, error) {
 }
 
 // Machine is what the fit check measured: the numbers behind every
-// StarterModel verdict, surfaced for the dev-mode model manager.
+// StarterModel verdict. Exact bytes throughout; the frontend rounds
+// down for display and dev mode shows Detail verbatim.
 type Machine struct {
-	RAMBytes  int64 `json:"ramBytes"`  // 0 = unknown
-	VRAMBytes int64 `json:"vramBytes"` // 0 = unknown or no discrete GPU
-	// Unified is true on Apple Silicon, where VRAM is always 0 and the
-	// GPU budget is a share of RAM instead.
+	RAMBytes int64 `json:"ramBytes"` // 0 = unknown
+	// VRAMBytes is the usable GPU budget the fit check used (free
+	// memory minus margins, or the unified share of RAM). 0 = no GPU
+	// budget: integrated-only, no GPU, or detection failed.
+	VRAMBytes int64 `json:"vramBytes"`
+	// GPUKind is sysinfo.Kind: discrete, unified, integrated, none,
+	// unknown. GPUName is the device Best picked ("" for none).
+	GPUKind string `json:"gpuKind"`
+	GPUName string `json:"gpuName"`
+	// VRAMTotalBytes/VRAMFreeBytes are the picked device's own figures
+	// (free includes what Ollama's loaded models hold). 0 = unknown.
+	VRAMTotalBytes int64 `json:"vramTotalBytes"`
+	VRAMFreeBytes  int64 `json:"vramFreeBytes"`
+	// Unified is true on Apple Silicon, where the GPU budget is a share
+	// of RAM and nothing spills to a separate pool.
 	Unified bool `json:"unified"`
+	// Detail is the raw detection report — every device with exact MiB
+	// figures and any probe failures — for dev mode and bug reports.
+	Detail string `json:"detail"`
 }
 
-// Machine measures RAM and discrete VRAM afresh.
+// Machine measures RAM and GPU memory afresh and budgets from the one
+// GPU sysinfo picks. Ollama's own resident models count as free VRAM
+// (see usableVRAM). The exact report is logged once per run.
 func (s *Service) Machine() Machine {
-	m := Machine{RAMBytes: int64(s.totalRAM()), Unified: s.unified}
-	if v, ok := s.gpuMemory(); ok {
-		m.VRAMBytes = int64(v)
+	report := s.detect()
+	pick := report.Best()
+	ram := s.totalRAM()
+	resident := s.ollamaResidentVRAM()
+	usable := usableVRAM(pick, ram, resident)
+
+	m := Machine{
+		RAMBytes:       int64(ram),
+		VRAMBytes:      int64(usable),
+		GPUKind:        string(pick.Kind),
+		GPUName:        pick.GPU.Name,
+		VRAMTotalBytes: int64(pick.GPU.TotalBytes),
+		Unified:        pick.Kind == sysinfo.KindUnified,
+		Detail:         fmt.Sprintf("%s. Picked: %s. RAM %d MiB", report, pick.Why, ram>>20),
 	}
+	if free := pick.GPU.FreeBytes; free > 0 {
+		m.VRAMFreeBytes = int64(min(free+resident, pick.GPU.TotalBytes))
+	}
+	if resident > 0 {
+		m.Detail += fmt.Sprintf("; Ollama holds %d MiB of VRAM", resident>>20)
+	}
+	m.Detail += fmt.Sprintf("; usable GPU budget %d MiB", usable>>20)
+	s.logOnce.Do(func() { log.Printf("sysinfo: %s", m.Detail) })
 	return m
+}
+
+// ollamaResidentVRAM sums the VRAM Ollama's currently loaded models
+// occupy, 0 when Ollama is unreachable.
+func (s *Service) ollamaResidentVRAM() uint64 {
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	loaded, err := s.provider().PS(ctx)
+	if err != nil {
+		return 0
+	}
+	var total uint64
+	for _, m := range loaded {
+		if m.SizeVRAM > 0 {
+			total += uint64(m.SizeVRAM)
+		}
+	}
+	return total
 }
 
 // Recommended returns the curated roster annotated with installed and
@@ -188,9 +246,14 @@ func (s *Service) Recommended() ([]StarterModel, error) {
 		sm.NeedBytes = int64(memoryNeed(sm.DownloadBytes, sm.MinRAMBytes))
 		sm.VRAMBytes = machine.VRAMBytes
 		sm.RAMBytes = machine.RAMBytes
+		sm.Machine = machine
 		sm.Fit = classifyFit(uint64(sm.NeedBytes), uint64(machine.VRAMBytes), uint64(machine.RAMBytes), machine.Unified)
 		sm.Fits = sm.Fit != FitTight
 		out = append(out, sm)
+	}
+	chosen := chooseRecommended(out)
+	for i := range out {
+		out[i].Recommended = i == chosen
 	}
 	return out, nil
 }
