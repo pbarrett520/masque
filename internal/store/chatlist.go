@@ -13,13 +13,16 @@ type ChatListItem struct {
 	CharacterName string `json:"characterName"`
 	Title         string `json:"title"`
 	UpdatedAt     int64  `json:"updatedAt"`
+	// CharacterDeleted marks chats whose character was deleted: still
+	// readable, not continuable.
+	CharacterDeleted bool `json:"characterDeleted"`
 }
 
 // ListChats returns all chats that belong to a character, most recently
-// updated first.
+// updated first. Chats of deleted characters are included and flagged.
 func (s *Store) ListChats() ([]ChatListItem, error) {
 	rows, err := s.db.Query(
-		"SELECT c.id, c.character_id, ch.name, c.title, c.updated_at " +
+		"SELECT c.id, c.character_id, ch.name, c.title, c.updated_at, ch.deleted_at IS NOT NULL " +
 			"FROM chats c JOIN characters ch ON ch.id = c.character_id " +
 			"ORDER BY c.updated_at DESC, c.id DESC",
 	)
@@ -31,7 +34,7 @@ func (s *Store) ListChats() ([]ChatListItem, error) {
 	for rows.Next() {
 		var it ChatListItem
 		var title sql.NullString
-		if err := rows.Scan(&it.ID, &it.CharacterID, &it.CharacterName, &title, &it.UpdatedAt); err != nil {
+		if err := rows.Scan(&it.ID, &it.CharacterID, &it.CharacterName, &title, &it.UpdatedAt, &it.CharacterDeleted); err != nil {
 			return nil, fmt.Errorf("scanning chat list: %w", err)
 		}
 		it.Title = title.String

@@ -48,6 +48,7 @@ func run() error {
 	settingsSvc := settings.NewService(st)
 	chatSvc := chat.NewService(st, app.emit, requestLog)
 	characterSvc := character.NewService(st)
+	app.onStartup = append(app.onStartup, characterSvc.SetContext)
 	ollamaMgrSvc := ollamamgr.NewService(st, app.emit)
 	devlogSvc := devlog.NewService(requestLog)
 

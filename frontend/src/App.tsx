@@ -45,6 +45,8 @@ export default function App() {
   const [chats, setChats] = useState<store.ChatListItem[]>([]);
   const [error, setError] = useState("");
   const initRef = useRef(false);
+  // Unsaved edits on the Characters tab; tab switches confirm first.
+  const dirtyRef = useRef(false);
 
   const refreshChats = useCallback(() => {
     ListChats()
@@ -112,6 +114,17 @@ export default function App() {
   const openCharacter = (characterId: number) =>
     OpenChat(characterId).then(applyState).catch((err) => setError(String(err)));
 
+  // After a character delete the open chat may have become read-only
+  // and list entries need their deleted label.
+  const characterDeleted = () => {
+    refreshChats();
+    if (chatState) {
+      OpenChatByID(chatState.chatId)
+        .then(setChatState)
+        .catch(() => {});
+    }
+  };
+
   const openChat = (chatId: number) =>
     OpenChatByID(chatId).then(applyState).catch((err) => setError(String(err)));
 
@@ -163,7 +176,12 @@ export default function App() {
       }
       disabled={disabled}
       aria-current={view === v ? "page" : undefined}
-      onClick={() => setView(v)}
+      onClick={() => {
+        if (v === view) return;
+        if (dirtyRef.current && !window.confirm("Discard unsaved changes?")) return;
+        dirtyRef.current = false;
+        setView(v);
+      }}
     >
       {label}
     </button>
@@ -199,14 +217,29 @@ export default function App() {
         )}
       </header>
       <main className="min-h-0 flex-1 overflow-y-auto p-6">
-        {view === "characters" && <CharactersScreen onOpen={openCharacter} />}
+        {view === "characters" && (
+          <CharactersScreen
+            onOpen={openCharacter}
+            dev={dev}
+            onDirtyChange={(d) => {
+              dirtyRef.current = d;
+            }}
+            onCharacterDeleted={characterDeleted}
+          />
+        )}
         {/* Chat view stays mounted so a streaming reply survives tab
             switches; ChatScreen is keyed by chatId so switching chats
             remounts it. */}
         {chatState && (
           <div className={view === "chat" ? "mx-auto flex h-full w-full max-w-6xl gap-8" : "hidden"}>
             <aside className="flex w-52 shrink-0 flex-col overflow-y-auto">
-              <Button variant="outline" size="sm" className="mb-3" onClick={newChat}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mb-3"
+                onClick={newChat}
+                disabled={chatState.characterDeleted}
+              >
                 New chat
               </Button>
               <ul className="flex flex-col gap-px">
@@ -224,7 +257,13 @@ export default function App() {
                       onClick={() => !active && openChat(c.id)}
                     >
                       <div className="flex items-center gap-1">
-                        <span className="truncate font-medium">
+                        <span
+                          className={
+                            "truncate font-medium" +
+                            (c.characterDeleted ? " text-muted-foreground line-through decoration-border" : "")
+                          }
+                          title={c.characterDeleted ? "This character was deleted" : undefined}
+                        >
                           {c.characterName}
                         </span>
                         <span className="flex-1" />

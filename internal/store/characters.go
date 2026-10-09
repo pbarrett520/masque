@@ -16,6 +16,9 @@ type Character struct {
 	HasAvatar bool   `json:"hasAvatar"`
 	CreatedAt int64  `json:"createdAt"`
 	UpdatedAt int64  `json:"updatedAt"`
+	// DeletedAt is non-zero once the character was deleted: hidden from
+	// the library, kept for its chats (migration 0005).
+	DeletedAt int64 `json:"deletedAt"`
 }
 
 // CreateCharacter inserts a character. avatar may be nil.
@@ -38,12 +41,12 @@ func (s *Store) CreateCharacter(name, cardJSON string, avatar []byte) (Character
 	}, nil
 }
 
-// ListCharacters returns all characters, newest first, without card
-// bodies or avatars.
+// ListCharacters returns all live (not deleted) characters, newest
+// first, without card bodies or avatars.
 func (s *Store) ListCharacters() ([]Character, error) {
 	rows, err := s.db.Query(
 		"SELECT id, name, avatar IS NOT NULL AND length(avatar) > 0, created_at, updated_at " +
-			"FROM characters ORDER BY id DESC",
+			"FROM characters WHERE deleted_at IS NULL ORDER BY id DESC",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing characters: %w", err)
@@ -63,14 +66,15 @@ func (s *Store) ListCharacters() ([]Character, error) {
 	return chars, nil
 }
 
-// GetCharacter returns the character with id including its card JSON;
-// the second return is false when it does not exist.
+// GetCharacter returns the character with id including its card JSON,
+// deleted or not (check DeletedAt); the second return is false when it
+// does not exist.
 func (s *Store) GetCharacter(id int64) (Character, bool, error) {
 	var c Character
-	var avatarLen sql.NullInt64
+	var avatarLen, deletedAt sql.NullInt64
 	err := s.db.QueryRow(
-		"SELECT id, name, card_json, length(avatar), created_at, updated_at FROM characters WHERE id = ?", id,
-	).Scan(&c.ID, &c.Name, &c.CardJSON, &avatarLen, &c.CreatedAt, &c.UpdatedAt)
+		"SELECT id, name, card_json, length(avatar), created_at, updated_at, deleted_at FROM characters WHERE id = ?", id,
+	).Scan(&c.ID, &c.Name, &c.CardJSON, &avatarLen, &c.CreatedAt, &c.UpdatedAt, &deletedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Character{}, false, nil
 	}
@@ -78,7 +82,57 @@ func (s *Store) GetCharacter(id int64) (Character, bool, error) {
 		return Character{}, false, fmt.Errorf("getting character %d: %w", id, err)
 	}
 	c.HasAvatar = avatarLen.Int64 > 0
+	c.DeletedAt = deletedAt.Int64
 	return c, true, nil
+}
+
+// UpdateCharacter replaces the name and card JSON. avatar: nil keeps
+// the current image, a non-nil slice replaces it, and clearAvatar
+// removes it.
+func (s *Store) UpdateCharacter(id int64, name, cardJSON string, avatar []byte, clearAvatar bool) error {
+	now := time.Now().Unix()
+	var res sql.Result
+	var err error
+	switch {
+	case clearAvatar:
+		res, err = s.db.Exec("UPDATE characters SET name = ?, card_json = ?, avatar = NULL, updated_at = ? WHERE id = ?", name, cardJSON, now, id)
+	case avatar != nil:
+		res, err = s.db.Exec("UPDATE characters SET name = ?, card_json = ?, avatar = ?, updated_at = ? WHERE id = ?", name, cardJSON, avatar, now, id)
+	default:
+		res, err = s.db.Exec("UPDATE characters SET name = ?, card_json = ?, updated_at = ? WHERE id = ?", name, cardJSON, now, id)
+	}
+	if err != nil {
+		return fmt.Errorf("updating character %d: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("character %d does not exist", id)
+	}
+	return nil
+}
+
+// ChatCount returns how many chats belong to a character.
+func (s *Store) ChatCount(characterID int64) (int, error) {
+	var n int
+	if err := s.db.QueryRow("SELECT count(*) FROM chats WHERE character_id = ?", characterID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("counting chats for character %d: %w", characterID, err)
+	}
+	return n, nil
+}
+
+// SoftDeleteCharacter hides a character from the library while keeping
+// its row and chats (spec: never delete conversations as a side
+// effect). Chats of a deleted character stay readable but are not
+// continued; the chat service enforces that.
+func (s *Store) SoftDeleteCharacter(id int64) error {
+	res, err := s.db.Exec("UPDATE characters SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+		time.Now().Unix(), time.Now().Unix(), id)
+	if err != nil {
+		return fmt.Errorf("deleting character %d: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("character %d does not exist", id)
+	}
+	return nil
 }
 
 // GetAvatar returns the character's avatar PNG, or nil if it has none.
@@ -94,8 +148,9 @@ func (s *Store) GetAvatar(id int64) ([]byte, error) {
 	return avatar, nil
 }
 
-// DeleteCharacter removes a character and its chats (messages first —
-// no ON DELETE CASCADE in the shipped schema).
+// DeleteCharacter hard-deletes a character and its chats (messages
+// first — no ON DELETE CASCADE in the shipped schema). The app uses
+// SoftDeleteCharacter; this remains for tests and future purge tooling.
 func (s *Store) DeleteCharacter(id int64) error {
 	tx, err := s.db.Begin()
 	if err != nil {
